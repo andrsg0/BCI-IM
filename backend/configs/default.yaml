@@ -1,0 +1,58 @@
+# ============================================================
+# Configuración por defecto del pipeline BCI (Etapa 1)
+# Cada parámetro está comentado con su rol en la teoría LTI.
+# ============================================================
+
+dataset:
+  name: "BNCI2014_001"     # BCI Competition IV 2a en MOABB
+  subjects: [1]            # empezamos con 1 sujeto; luego ampliamos
+  # Clases del 2a: left_hand, right_hand, feet, tongue
+  classes: ["left_hand", "right_hand"]   # binario para empezar (CSP clásico)
+
+epoching:
+  # Ventana relativa al ONSET de la anotación (= inicio del trial).
+  # En el 2a el cue de imaginación aparece a los 2 s y dura hasta los 6 s,
+  # por eso dataset.interval = [2, 6]. Usamos esa ventana completa para poder
+  # validar nuestro epoching contra el Paradigm de MOABB (4 s = 1001 muestras).
+  tmin: 2.0
+  tmax: 6.0
+  picks: "eeg"           # 22 canales EEG; se descartan EOG y STIM
+  baseline: null
+
+# --- Ventana de clasificación: recorte a la fase de imaginación ACTIVA ---
+# Relativo al inicio del epoch [2,6]s. Estrategia: filtramos (FIR) el epoch
+# completo y LUEGO recortamos. Así (1) descartamos el transitorio de borde del
+# FIR (~retardo de grupo = 50 muestras) y (2) nos quedamos con la sub-ventana
+# más discriminativa. Medido inter-sesión sujeto 1: [2-6]s→0.52, [2.5-4.5]s→0.74.
+classification_window:
+  tmin_rel: 0.5          # = 2.5 s del trial (0.5 s tras el cue)
+  tmax_rel: 2.5          # = 4.5 s del trial
+
+# --- Filtro FIR pasa-banda: banda mu (8-12) + beta (12-30) ---
+# Aquí vive la teoría LTI: y[n] = sum_k h[k] x[n-k]  (convolución discreta)
+fir_filter:
+  low_hz: 8.0             # corte inferior (ritmo mu)
+  high_hz: 30.0          # corte superior (ritmo beta)
+  num_taps: 101          # orden del FIR (longitud de h[n]); impar => fase lineal
+  window: "hamming"      # ventana para el diseño del FIR
+  fs: 250                # Hz, frecuencia de muestreo del dataset 2a
+
+# --- CSP: filtro espacial lineal que maximiza varianza entre clases ---
+csp:
+  n_components: 4         # nº de filtros espaciales (pares extremos del espectro)
+  log_variance: true     # característica: log de la varianza de cada componente
+  shrinkage: 0.0         # regularización de covarianza [0,1]; >0 estabiliza con pocos trials
+
+classifier:
+  type: "lda"            # clasificador lineal (frontera lineal en el espacio de features)
+  cv_folds: 5
+
+# --- Simulación de transmisión en vivo (Etapa 1, hito final) ---
+streaming:
+  window_s: 2.0          # tamaño de ventana deslizante
+  step_s: 0.1            # avance entre ventanas (solapamiento)
+  realtime_factor: 1.0   # 1.0 = velocidad real; <1 acelera la demo
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"

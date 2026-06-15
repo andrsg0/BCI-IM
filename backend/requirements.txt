@@ -1,0 +1,25 @@
+# ===== Núcleo científico (teoría LTI: convolución, FIR, CSP) =====
+numpy>=1.26
+scipy>=1.11            # solo para VALIDAR nuestra convolución/FIR, no para reemplazarla
+scikit-learn>=1.3     # LDA y validación cruzada
+
+# ===== EEG: carga y manejo de datasets =====
+mne>=1.6              # estructuras Raw/Epochs, lectura GDF/EDF
+moabb>=1.1           # cargador de BCI Competition IV 2a y otros
+
+# ===== Configuración y utilidades =====
+pyyaml>=6.0
+pandas>=2.0
+matplotlib>=3.8      # gráficas didácticas (MAC, respuesta en frecuencia, pesos CSP)
+
+# ===== API para el frontend (Etapa 2: streaming en vivo) =====
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+
+# ===== Tests =====
+pytest>=8.0
+
+# ===== Deep learning (EEGNet) =====
+# instalado con: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2         # EEGNet (CNN compacta que imita el pipeline LTI)

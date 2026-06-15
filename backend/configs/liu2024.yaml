@@ -1,0 +1,48 @@
+# ============================================================
+# Configuración para Liu2024 (Nature Scientific Data, 2024)
+# Dataset reciente y de alta calidad. fs=500 Hz, ~29 canales EEG,
+# 1 sesión, 40 trials/sujeto (20 izq + 20 der). interval (0, 4).
+# El fs lo toma el pipeline de los datos (fs dinámico).
+# ============================================================
+
+dataset:
+  name: "Liu2024"
+  subjects: [1]
+  classes: ["left_hand", "right_hand"]
+
+epoching:
+  # La imaginación empieza en el onset de la anotación; la tarea dura ~4 s.
+  tmin: 0.0
+  tmax: 4.0
+  picks: "eeg"           # solo canales EEG (se descartan EOG y STIM)
+  baseline: null
+
+# Ventana de imaginación activa (a 500 Hz, [0.5,2.5] s = 1000 muestras).
+classification_window:
+  tmin_rel: 0.5
+  tmax_rel: 2.5
+
+fir_filter:
+  low_hz: 8.0
+  high_hz: 30.0
+  num_taps: 101
+  window: "hamming"
+  fs: 500                # informativo; manda el fs real de los datos
+
+csp:
+  n_components: 4
+  log_variance: true
+  shrinkage: 0.0         # regularización de covarianza [0,1]; útil aquí (~40 trials/sujeto)
+
+classifier:
+  type: "lda"
+  cv_folds: 5
+
+streaming:
+  window_s: 2.0
+  step_s: 0.1
+  realtime_factor: 1.0
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"

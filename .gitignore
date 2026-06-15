@@ -1,0 +1,45 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ---- Datos (pesados / descargados) ----
+backend/data/raw/*
+backend/data/processed/*
+!backend/data/raw/.gitkeep
+!backend/data/processed/.gitkeep
+# Caché de MNE/MOABB
+mne_data/
+*.gdf
+*.edf
+*.mat
+*.npy
+*.npz
+
+# ---- Modelos entrenados ----
+*.pkl
+*.joblib
+*.pt
+*.h5
+
+# ---- Frontend / Node ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# ---- Sistema / IDE ----
+.DS_Store
+.idea/
+.vscode/
+*.log
