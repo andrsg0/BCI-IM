@@ -77,9 +77,11 @@ def test_stream_produces_predictions():
     results = sim.stream(X[0])
     assert len(results) > 0
     r = results[0]
-    assert set(r) == {"t", "pred", "probs", "power"}
+    assert set(r) == {"t", "pred", "probs", "power", "feat", "disc"}
     assert len(r["power"]) == X.shape[1]                   # una potencia por canal
     assert abs(sum(r["probs"].values()) - 1.0) < 1e-6     # softmax suma 1
+    assert len(r["feat"]) == _CFG["csp"]["n_components"]   # un rasgo por componente CSP
+    assert isinstance(r["disc"], float)                    # proyección discriminante escalar
 
 
 def test_stream_vote_matches_class():

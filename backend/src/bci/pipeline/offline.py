@@ -76,7 +76,15 @@ class MotorImageryPipeline:
         """Clasifica UNA ventana YA FILTRADA (n_canales, n_tiempo).
 
         Pensado para streaming: el filtrado FIR causal se hace fuera (con estado),
-        y aquí solo aplicamos CSP → log-varianza → LDA. Devuelve (clase, prob_dict).
+        y aquí solo aplicamos CSP → log-varianza → LDA. Devuelve
+        ``(clase, prob_dict, info)``, donde ``info`` expone las dos etapas para
+        visualizarlas EN VIVO:
+          - ``feat`` : vector de log-varianza por componente CSP (lo que produce el
+            filtrado espacial; cada número es la potencia de una "señal virtual").
+          - ``disc``: proyección sobre la recta discriminante del LDA
+            δ(clase₁) − δ(clase₀). Es un único escalar con signo: la FRONTERA está
+            en 0; el signo da la clase y la magnitud, la confianza. Sirve para situar
+            la ventana respecto a la frontera lineal aprendida.
         """
         Z = self.csp.transform(Xf_window[None, :, :])           # (1, comp, tiempo)
         F = log_variance(Z, normalize=self._normalize)
@@ -85,7 +93,11 @@ class MotorImageryPipeline:
         # softmax de las puntuaciones -> pseudo-probabilidades para mostrar confianza
         e = np.exp(scores - scores.max())
         probs = {str(c): float(p) for c, p in zip(self.lda.classes_, e / e.sum())}
-        return pred, probs
+        # disc = δ_1 − δ_0: distancia con signo a la frontera lineal (caso binario).
+        disc = float(scores[1] - scores[0]) if len(scores) == 2 else float(
+            scores.max() - np.sort(scores)[-2])
+        info = {"feat": F[0].tolist(), "disc": disc}
+        return pred, probs, info
 
 
 @dataclass

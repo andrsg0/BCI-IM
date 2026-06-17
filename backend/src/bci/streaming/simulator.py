@@ -97,12 +97,14 @@ class StreamSimulator:
                 filtered = filtered[:, -self.window:]
 
             if filtered.shape[1] == self.window:
-                pred, probs = self.pipe.classify_window(filtered)
+                pred, probs, info = self.pipe.classify_window(filtered)
                 # Potencia µ/β por canal (log-varianza de la ventana filtrada): sirve para
                 # "iluminar" en vivo qué zonas del cuero cabelludo están activas.
                 power = np.log(np.var(filtered, axis=1) + 1e-12)
                 rec = {"t": (start + self.step) / self.fs, "pred": pred, "probs": probs,
-                       "power": power.tolist()}
+                       "power": power.tolist(),
+                       # Etapas CSP/LDA de ESTA ventana (para visualizarlas en vivo).
+                       "feat": info["feat"], "disc": info["disc"]}
                 # Señal cruda y filtrada del canal de referencia (en µV) para el dashboard.
                 if self.ref_idx is not None:
                     rec["raw"] = (chunk[self.ref_idx] * 1e6).tolist()

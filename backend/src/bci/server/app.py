@@ -16,6 +16,7 @@ petición.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +55,13 @@ _model_cache: dict[tuple[str, int, str], tuple[object, dict]] = {}
 def _config_for(dataset: str) -> dict:
     if dataset not in REGISTRY:
         raise KeyError(dataset)
-    cfg = load_config(REGISTRY[dataset]['config'])
+    # Los configs/ viven en la RAÍZ del repo (BACKEND_ROOT.parent), no en backend/;
+    # resolvemos a absoluta para que el servidor funcione sea cual sea el directorio
+    # desde el que se arranque (las rutas de datos del YAML sí cuelgan de backend/).
+    cfg_path = Path(REGISTRY[dataset]['config'])
+    if not cfg_path.is_absolute():
+        cfg_path = BACKEND_ROOT.parent / cfg_path
+    cfg = load_config(cfg_path)
     return cfg
 
 
@@ -298,27 +305,48 @@ def eegnet_info(dataset: str, subject: int = 1):
     }
 
 
+_csp_cache: dict[tuple[str, int], dict] = {}
+
+
 @app.get('/api/csp')
 def csp(dataset: str, subject: int = 1):
     """Filtros/patrones espaciales CSP + separación log-varianza + posiciones.
 
     Pertenece al mundo OFFLINE: muestra el modelo ya entrenado. Los rasgos
     log-varianza son los de la partición de ENTRENAMIENTO (no se incluye el
-    held-out reservado para la demo, para no mezclar los dos mundos)."""
+    held-out reservado para la demo, para no mezclar los dos mundos).
+
+    Es un artefacto FIJO del entrenamiento: el modelo, el split y los rasgos son
+    deterministas, así que cacheamos la respuesta por (dataset, sujeto). La sección
+    En vivo la reutiliza como fondo (nube de entrenamiento) sobre el que dibuja, en
+    tiempo real, el punto de cada ventana en el espacio CSP y en la recta del LDA."""
+    key = (dataset, subject)
+    if key in _csp_cache:
+        return _csp_cache[key]
+
     data = _get_data(dataset, subject)
     pipe = _get_pipeline(dataset, subject)
     idx_train, _ = _split_idx(dataset, subject)
     feats = pipe._features(data.X[idx_train])     # (n_train, n_componentes)
     pos2d, pos3d = _positions(data.ch_names)
-    return {
+    # Proyección de cada trial de entrenamiento sobre la recta discriminante del LDA
+    # (δ_1 − δ_0). Da el HISTOGRAMA de fondo del eje de decisión que la sección En
+    # vivo usa para situar la ventana actual respecto a la frontera (en 0).
+    scores = pipe.lda.decision_function(feats)    # (n_train, n_clases)
+    lda_disc = (scores[:, 1] - scores[:, 0]).tolist() if scores.shape[1] == 2 else \
+        (scores.max(axis=1) - np.sort(scores, axis=1)[:, -2]).tolist()
+    resp = {
         'channels': data.ch_names,
         'eigenvalues': pipe.csp.eigenvalues_.tolist(),
         'patterns': pipe.csp.patterns_.T.tolist(),   # (n_componentes, n_canales)
         'classes': sorted(set(map(str, data.y))),
         'features': feats.tolist(),
         'labels': [str(c) for c in np.asarray(data.y)[idx_train]],
+        'lda_disc': lda_disc,                        # proyección discriminante (n_train,)
         'pos2d': pos2d, 'pos3d': pos3d,
     }
+    _csp_cache[key] = resp
+    return resp
 
 
 _raw_cache: dict[tuple[str, int], object] = {}
@@ -409,6 +437,9 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
                     'trial': idx, 'true': str(data.y[idx]),
                     't': r['t'], 'pred': r['pred'], 'probs': r['probs'],
                     'power': r['power'], 'raw': r.get('raw'), 'filt': r.get('filt'),
+                    # Etapas CSP (vector log-varianza) y LDA (proyección discriminante)
+                    # de la ventana, para diferenciarlas en la sección En vivo.
+                    'feat': r.get('feat'), 'disc': r.get('disc'),
                     'ref_ch': ref_ch, 'alo': alo, 'ahi': ahi,
                 })
                 await asyncio.sleep(step)

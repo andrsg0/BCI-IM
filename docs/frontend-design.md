@@ -136,6 +136,31 @@ en localStorage** (una clave por página) y botón "Restablecer disposición".
 - Páginas migradas: **Dashboard, Laboratorio (SignalLab), Clasificación (LiveStream), El Modelo
   (CSP) y Resultados**. Cada una mantiene su lógica; solo cambia la disposición a la cuadrícula.
 
+### El recorrido CSP → LDA EN VIVO — `components/charts/PipelineStages.tsx` (implementado)
+
+La sección **Clasificación en vivo** dejaba la impresión de que la señal filtrada "se clasifica
+sin más". Ahora muestra el **recorrido de cada ventana** como tres etapas LTI **bien diferenciadas**,
+para que se vea que entre el filtrado y la decisión hay dos sistemas lineales distintos:
+
+1. **Señal filtrada que entra** (cian/FIR): traza deslizante del canal de referencia ya filtrado
+   (FIR causal). Es la **entrada** a la siguiente etapa.
+2. **CSP · filtrado espacial** (morado): cada ventana se proyecta `Z = W·X` y se resume en su
+   **log-varianza** → un **punto** en el espacio de características (comp 0 vs comp último). De fondo,
+   **quieta**, la nube de ENTRENAMIENTO; encima, **moviéndose**, el punto de la ventana actual.
+3. **LDA · frontera de decisión** (verde): ese vector se **proyecta sobre la recta discriminante**
+   `δ₁−δ₀`; la **frontera** está en 0. De qué lado cae el punto es la clase; la distancia, la confianza.
+
+Puntos clave de implementación:
+- Las dos vistas (`CSPSpaceLive`, `LDAAxisLive`) son **SVG imperativos**: el fondo (nube de
+  entrenamiento) se renderiza una vez y el **punto en vivo se mueve por refs** (`useImperativeHandle`),
+  sin re-render de React a 10 Hz (mismo criterio que `uPlot.setData`). Van envueltas en `memo`.
+- El backend añade por ventana, en `classify_window` → simulador → WebSocket, el vector `feat`
+  (log-varianza CSP) y `disc` (proyección discriminante con signo). `GET /api/csp` se **cachea** y
+  ahora devuelve también `lda_disc` (proyección de los trials de entrenamiento) como **fondo** del eje.
+- Refuerza la conexión con **«El Modelo»** (mundo offline): mismo scatter y mismos ejes, ya
+  renombrados con significado (`comp 0 · favorece <clase> (λ=…)`), donde se ve el modelo FIJO; aquí se
+  ve su **aplicación en vivo** sobre esa misma nube.
+
 ### Cerebro 3D EN VIVO (implementado)
 
 `pages/Brain3DPage.tsx` pasó del mundo offline (pesos fijos del CSP) al mundo **online**: ahora la

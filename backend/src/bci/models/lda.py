@@ -7,7 +7,7 @@ Modelo: cada clase es una gaussiana con su propia media μ_k pero una MISMA matr
 de covarianza Σ (compartida). Bajo ese supuesto, la regla de Bayes se reduce a una
 función discriminante LINEAL en x:
 
-        δ_k(x) = xᵀ Σ⁻¹ μ_k − ½ μ_kᵀ Σ⁻¹ μ_k + log π_k
+        δ_k(x) = xᵀ Σ⁻¹ μ_k - ½ μ_kᵀ Σ⁻¹ μ_k + log π_k
 
 Se asigna la clase con mayor δ_k. Como los términos cuadráticos en x se cancelan
 (la Σ es común), la frontera entre dos clases es un hiperplano -> "lineal".

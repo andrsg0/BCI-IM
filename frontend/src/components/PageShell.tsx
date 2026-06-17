@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { HelpButton, type HelpContent } from './HelpButton'
-import { WorldBadge } from './WorldBadge'
 import type { World } from '../lib/nav'
 
 /** Contenedor estándar de página: título, subtítulo, botón de ayuda y contenido. */
@@ -14,18 +13,17 @@ export function PageShell({
   title: string
   subtitle?: string
   help?: HelpContent
-  /** Mundo al que pertenece la página (muestra el distintivo entrenar/transmitir). */
+  /** Mundo al que pertenece la página. Lo indica la agrupación del nav lateral; aquí
+   *  se acepta por compatibilidad pero ya NO se muestra un distintivo junto al título. */
   world?: Exclude<World, 'general'>
   children: ReactNode
 }) {
+  void world
   return (
     <div className="mx-auto max-w-7xl">
       <header className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
-            {world && <WorldBadge world={world} />}
-          </div>
+          <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
           {subtitle && <p className="mt-1 text-slate-500">{subtitle}</p>}
         </div>
         {help && <HelpButton title={title} help={help} />}

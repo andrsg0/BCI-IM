@@ -48,6 +48,9 @@ export default function SpatialCSP() {
     return { last, byClass }
   }, [csp])
 
+  // qué clase resalta cada componente: λ alto (≥0.5) → primera clase; λ bajo → segunda.
+  const favoredClass = (ci: number) => (csp && csp.eigenvalues[ci] >= 0.5 ? csp.classes[0] : csp?.classes[1])
+
   return (
     <PageShell
       title="El Modelo · Filtrado espacial (CSP)"
@@ -79,13 +82,22 @@ export default function SpatialCSP() {
               accent: 'csp',
               w: 8, h: 6, minW: 4, minH: 4,
               el: (
-                <div className="flex flex-wrap justify-around gap-2">
-                  {csp.patterns.map((pat, ci) => (
-                    <div key={ci} className="text-center">
-                      <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={160} />
-                      <div className="text-xs text-slate-500">comp {ci} · <span className="font-mono">λ={csp.eigenvalues[ci].toFixed(2)}</span></div>
-                    </div>
-                  ))}
+                <div className="flex h-full flex-col">
+                  <p className="mb-2 text-[11px] leading-snug text-slate-500">
+                    Cada mapa es un <strong>filtro espacial</strong> (cómo combina los electrodos). Su autovalor <span className="font-mono">λ</span> dice a qué clase
+                    responde: <span className="font-mono">λ≈1</span> resalta una mano y <span className="font-mono">λ≈0</span> la otra. Los más útiles se lateralizan sobre C3/C4 (corteza motora).
+                  </p>
+                  <div className="flex flex-1 flex-wrap content-start justify-around gap-2">
+                    {csp.patterns.map((pat, ci) => (
+                      <div key={ci} className="text-center">
+                        <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={150} />
+                        <div className="text-xs text-slate-600">
+                          comp {ci} · favorece <span style={{ color: CLASS_COLORS[csp.eigenvalues[ci] >= 0.5 ? 0 : 1] }}>{favoredClass(ci)}</span>
+                        </div>
+                        <div className="font-mono text-[11px] text-slate-400">λ={csp.eigenvalues[ci].toFixed(2)}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ),
             },
@@ -95,20 +107,29 @@ export default function SpatialCSP() {
               accent: 'csp',
               w: 4, h: 6, minW: 3, minH: 4,
               el: scatter ? (
-                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
-                  <ScatterChart margin={{ top: 8, right: 8, bottom: 20, left: 0 }}>
-                    <CartesianGrid stroke="#eef2f7" />
-                    <XAxis type="number" dataKey="x" name={`comp 0`} tick={{ fontSize: 11 }}
-                      label={{ value: 'log-var comp 0', position: 'bottom', fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis type="number" dataKey="y" name={`comp ${scatter.last}`} tick={{ fontSize: 11 }}
-                      label={{ value: `comp ${scatter.last}`, angle: -90, position: 'insideLeft', fontSize: 11, fill: '#94a3b8' }} />
-                    <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {scatter.byClass.map((pts, i) => (
-                      <Scatter key={i} name={csp.classes[i]} data={pts} fill={CLASS_COLORS[i % CLASS_COLORS.length]} fillOpacity={0.6} />
-                    ))}
-                  </ScatterChart>
-                </ResponsiveContainer>
+                <div className="flex h-full flex-col">
+                  <p className="mb-1 text-[11px] leading-snug text-slate-500">
+                    Cada punto es un <strong>trial</strong>. Eje X = potencia del <strong>comp 0</strong> (sube con{' '}
+                    <span style={{ color: CLASS_COLORS[0] }}>{csp.classes[0]}</span>); eje Y = <strong>comp {scatter.last}</strong> (sube con{' '}
+                    <span style={{ color: CLASS_COLORS[1] }}>{csp.classes[1]}</span>). Si las dos nubes se <strong>separan</strong>, las clases son distinguibles: ese es el objetivo del CSP.
+                  </p>
+                  <div className="min-h-0 flex-1">
+                    <ResponsiveContainer width="100%" height="100%" minHeight={160}>
+                      <ScatterChart margin={{ top: 4, right: 12, bottom: 26, left: 4 }}>
+                        <CartesianGrid stroke="#eef2f7" />
+                        <XAxis type="number" dataKey="x" name="log-var comp 0" tick={{ fontSize: 11 }}
+                          label={{ value: `log-var comp 0  →  ${csp.classes[0]}`, position: 'bottom', fontSize: 10, fill: '#94a3b8' }} />
+                        <YAxis type="number" dataKey="y" name={`log-var comp ${scatter.last}`} tick={{ fontSize: 11 }}
+                          label={{ value: `comp ${scatter.last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
+                        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                        <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
+                        {scatter.byClass.map((pts, i) => (
+                          <Scatter key={i} name={csp.classes[i]} data={pts} fill={CLASS_COLORS[i % CLASS_COLORS.length]} fillOpacity={0.6} />
+                        ))}
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               ) : <div />,
             } satisfies GridWidget,
           ]}
