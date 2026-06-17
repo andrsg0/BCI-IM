@@ -3,8 +3,8 @@ import type uPlot from 'uplot'
 import { Radio, Plus, X, RotateCcw } from 'lucide-react'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { Widget } from '../components/Widget'
-import { UPlotChart } from '../components/charts/UPlotChart'
+import { GridBoard, type GridWidget } from '../components/GridBoard'
+import { FillChart } from '../components/charts/FillChart'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { getJSON } from '../api/client'
@@ -162,57 +162,67 @@ export default function SignalLab() {
     plugins: [{ hooks: { drawClear: (u: uPlot) => drawBand(u, bandRef.current) } }],
   }), [])
 
+  const widgets: GridWidget[] = mat ? [
+    ...views.map((v): GridWidget => ({
+      i: `view-${v.id}`,
+      title: v.mode === 'raw' ? 'Cruda' : 'Filtrada (causal)',
+      accent: v.mode === 'raw' ? 'signal' : 'fir',
+      w: 8, h: 4, minW: 4, minH: 3,
+      actions: (
+        <>
+          <select value={v.channel} onChange={(e) => updateView(v.id, { channel: e.target.value })} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs">
+            {mat.channels.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={v.mode} onChange={(e) => updateView(v.id, { mode: e.target.value as View['mode'] })} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs">
+            <option value="raw">cruda</option><option value="filtered">filtrada</option>
+          </select>
+          <button onClick={() => removeView(v.id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-500"><X size={14} /></button>
+        </>
+      ),
+      el: <ViewChart id={v.id} mode={v.mode} data={rawInit} overlay={overlay} register={register} />,
+    })),
+    {
+      i: 'freq', title: 'Respuesta en frecuencia  |H(e^jω)|', accent: 'fir', w: 4, h: 4, minW: 3, minH: 3,
+      el: filter ? <FillChart data={freqData} options={freqOptions} /> : <div className="h-full" />,
+    },
+    {
+      i: 'filter', title: 'Filtro FIR (exploración)', accent: 'fir', w: 4, h: 5, minW: 3, minH: 4,
+      el: (
+        <div className="space-y-3 text-sm">
+          <Slider label={`Corte inferior: ${low} Hz`} min={1} max={high - 1} value={low} onChange={setLow} />
+          <Slider label={`Corte superior: ${high} Hz`} min={low + 1} max={Math.floor(fs / 2)} value={high} onChange={setHigh} />
+          <div>
+            <label className="mb-1 block text-slate-500">Nº de taps (coeficientes): {taps}</label>
+            <select value={taps} onChange={(e) => setTaps(Number(e.target.value))} className="w-full rounded-md border border-slate-300 px-2 py-1.5">
+              {[51, 75, 101, 151, 201].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <button onClick={resetFilter} className="flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-100"><RotateCcw size={13} /> Restaurar banda µ/β (8–30)</button>
+        </div>
+      ),
+    },
+  ] : []
+
   return (
     <PageShell title="Laboratorio de Señales (LTI & CSP)"
       subtitle="Señal cruda x[n] y su convolución y[n]."
       help={HELP} world="online">
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-        <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-          <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido'} · {headSec.toFixed(1)} s
-        </span>
-        <button onClick={addView} className="ml-auto flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 hover:bg-slate-100"><Plus size={15} /> Añadir gráfica</button>
-      </div>
-
-      <div className="grid items-start gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          {!mat ? <div className="flex h-48 items-center justify-center text-slate-300">Cargando…</div> : views.map((v) => (
-            <Widget key={v.id} accent={v.mode === 'raw' ? 'signal' : 'fir'}
-              title={v.mode === 'raw' ? 'Cruda' : 'Filtrada (causal)'}
-              actions={
-                <div className="flex items-center gap-1">
-                  <select value={v.channel} onChange={(e) => updateView(v.id, { channel: e.target.value })} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs">
-                    {mat.channels.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <select value={v.mode} onChange={(e) => updateView(v.id, { mode: e.target.value as View['mode'] })} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs">
-                    <option value="raw">cruda</option><option value="filtered">filtrada</option>
-                  </select>
-                  <button onClick={() => removeView(v.id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-500"><X size={14} /></button>
-                </div>
-              }>
-              <ViewChart id={v.id} mode={v.mode} data={rawInit} overlay={overlay} register={register} />
-            </Widget>
-          ))}
-        </div>
-
-        <div className="space-y-4">
-          <Widget title="Respuesta en frecuencia  |H(e^jω)|" accent="fir">
-            {filter ? <UPlotChart data={freqData} options={freqOptions} height={170} /> : <div className="h-[170px]" />}
-          </Widget>
-          <Widget title="Filtro FIR (exploración)" accent="fir">
-            <div className="space-y-3 text-sm">
-              <Slider label={`Corte inferior: ${low} Hz`} min={1} max={high - 1} value={low} onChange={setLow} />
-              <Slider label={`Corte superior: ${high} Hz`} min={low + 1} max={Math.floor(fs / 2)} value={high} onChange={setHigh} />
-              <div>
-                <label className="mb-1 block text-slate-500">Nº de taps (coeficientes): {taps}</label>
-                <select value={taps} onChange={(e) => setTaps(Number(e.target.value))} className="w-full rounded-md border border-slate-300 px-2 py-1.5">
-                  {[51, 75, 101, 151, 201].map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
-              <button onClick={resetFilter} className="flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-100"><RotateCcw size={13} /> Restaurar banda µ/β (8–30)</button>
-            </div>
-          </Widget>
-        </div>
-      </div>
+      {!mat ? (
+        <div className="flex h-48 items-center justify-center text-slate-300">Cargando…</div>
+      ) : (
+        <GridBoard
+          widgets={widgets}
+          storageKey="signalLabLayout-v1"
+          toolbar={
+            <>
+              <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+                <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido'} · {headSec.toFixed(1)} s
+              </span>
+              <button onClick={addView} className="flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-sm hover:bg-slate-100"><Plus size={15} /> Añadir gráfica</button>
+            </>
+          }
+        />
+      )}
     </PageShell>
   )
 }
@@ -228,7 +238,7 @@ function ViewChart({ id, mode, data, overlay, register }: {
     plugins: [{ hooks: { draw: (u: uPlot) => drawOverlay(u, overlay.current!, mode === 'raw') } }],
   }), [mode, overlay])
   useEffect(() => () => register(id, null), [id, register])
-  return <UPlotChart data={data} options={options} height={170} onCreate={(u) => register(id, u)} />
+  return <FillChart data={data} options={options} onCreate={(u) => register(id, u)} />
 }
 
 function Slider({ label, min, max, value, onChange }: { label: string; min: number; max: number; value: number; onChange: (n: number) => void }) {

@@ -118,6 +118,24 @@ Cuadrícula: drag desde la cabecera, resize desde la esquina inferior derecha, *
 > La cuadrícula propia mide el ancho con `ResizeObserver` y actualiza x/y/w/h en unidades de celda
 > durante el arrastre, con `pointermove`/`pointerup` en `window`.
 
+### Cuadrícula reutilizable en TODAS las secciones — `components/GridBoard.tsx` (implementado)
+
+La mecánica del Dashboard se **extrajo a un componente genérico** `GridBoard` para que **cada
+sección** tenga el mismo modo "pizarrón": arrastrar paneles desde la cabecera, redimensionar desde
+la esquina, **snap** a una rejilla de 12 columnas sobre **fondo de puntos**, disposición **persistida
+en localStorage** (una clave por página) y botón "Restablecer disposición".
+
+- API: `<GridBoard widgets={GridWidget[]} storageKey="..." toolbar={…} />`. Cada `GridWidget` define
+  `{ i, title, accent, w, h, minW, minH, actions?, el }` (tamaño/mínimos en celdas).
+- **Soporta widgets dinámicos**: al añadir/quitar paneles (p. ej. "Añadir gráfica" en el Laboratorio)
+  el tablero **reconcilia** la disposición — conserva los existentes y coloca los nuevos en el primer
+  hueco libre (`firstFit`).
+- Gráficos **rellenan el panel**: `components/charts/FillChart.tsx` mide la altura disponible con
+  `ResizeObserver` y la pasa a `UPlotChart`, que ahora **aplica el alto con `setSize`** (sin recrear
+  la instancia) para que el redimensionado sea suave y no rompa los gráficos en vivo.
+- Páginas migradas: **Dashboard, Laboratorio (SignalLab), Clasificación (LiveStream), El Modelo
+  (CSP) y Resultados**. Cada una mantiene su lógica; solo cambia la disposición a la cuadrícula.
+
 ### Cerebro 3D EN VIVO (implementado)
 
 `pages/Brain3DPage.tsx` pasó del mundo offline (pesos fijos del CSP) al mundo **online**: ahora la

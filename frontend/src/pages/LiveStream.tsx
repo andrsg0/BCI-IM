@@ -3,8 +3,8 @@ import type uPlot from 'uplot'
 import { Radio, Check, X, Database } from 'lucide-react'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { Widget } from '../components/Widget'
-import { UPlotChart } from '../components/charts/UPlotChart'
+import { GridBoard, type GridWidget } from '../components/GridBoard'
+import { FillChart } from '../components/charts/FillChart'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
 
@@ -126,6 +126,61 @@ export default function LiveStream() {
   const curDecided = !!cur && cur.conf >= threshold
   const curOk = curDecided && cur!.pred === cur!.t
 
+  const widgets: GridWidget[] = [
+    {
+      i: 'pred', title: 'Predicción del trial', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3,
+      el: !cur ? (
+        <div className="py-8 text-center text-slate-300">esperando…</div>
+      ) : curDecided ? (
+        <div className="flex flex-col items-center py-4">
+          <div className="text-3xl font-bold" style={{ color: colorOf(cur.pred) }}>{cur.pred}</div>
+          <div className={`mt-2 flex items-center gap-1 text-sm ${curOk ? 'text-emerald-600' : 'text-red-500'}`}>
+            {curOk ? <Check size={15} /> : <X size={15} />} real: {cur.t}
+          </div>
+          <div className="mt-1 text-xs text-slate-400">voto de {cur.n} ventanas · conf {(cur.conf * 100).toFixed(0)}%</div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center py-4">
+          <div className="text-xl font-semibold text-slate-400">decidiendo…</div>
+          <div className="mt-2 text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}% &lt; umbral {(threshold * 100).toFixed(0)}%</div>
+        </div>
+      ),
+    },
+    {
+      i: 'conf', title: 'Confianza (ventana actual)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3,
+      el: (
+        <div className="space-y-3 py-2">
+          {last ? Object.keys(last.probs).map((cls) => (
+            <div key={cls}>
+              <div className="mb-1 flex justify-between text-sm text-slate-600">
+                <span>{cls}</span><span className="font-mono">{(last.probs[cls] * 100).toFixed(0)}%</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full transition-all" style={{ width: `${last.probs[cls] * 100}%`, background: colorOf(cls) }} />
+              </div>
+            </div>
+          )) : <div className="text-center text-slate-300">—</div>}
+        </div>
+      ),
+    },
+    {
+      i: 'classes', title: 'Clases', accent: 'metric', w: 4, h: 4, minW: 2, minH: 3,
+      el: (
+        <div className="space-y-2 py-2 text-sm text-slate-600">
+          {classes.map((cls) => (
+            <div key={cls} className="flex items-center gap-2">
+              <span className="inline-block h-3 w-5 rounded" style={{ background: colorOf(cls) }} /> {cls}
+            </div>
+          ))}
+        </div>
+      ),
+    },
+    {
+      i: 'evolution', title: 'Evolución de la confianza (últimas ventanas)', accent: 'signal', w: 12, h: 5, minW: 4, minH: 3,
+      el: <FillChart data={EMPTY} options={chartOptions} onCreate={(u) => (chartU.current = u)} />,
+    },
+  ]
+
   return (
     <PageShell
       title="Clasificación en vivo"
@@ -195,61 +250,7 @@ export default function LiveStream() {
           Pulsa <strong>Play</strong> en el panel lateral para iniciar la transmisión.
         </div>
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-3">
-          {/* predicción del trial en curso (voto suave acumulado) */}
-          <Widget title="Predicción del trial" accent="metric">
-            {!cur ? (
-              <div className="py-8 text-center text-slate-300">esperando…</div>
-            ) : curDecided ? (
-              <div className="flex flex-col items-center py-4">
-                <div className="text-3xl font-bold" style={{ color: colorOf(cur.pred) }}>{cur.pred}</div>
-                <div className={`mt-2 flex items-center gap-1 text-sm ${curOk ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {curOk ? <Check size={15} /> : <X size={15} />} real: {cur.t}
-                </div>
-                <div className="mt-1 text-xs text-slate-400">voto de {cur.n} ventanas · conf {(cur.conf * 100).toFixed(0)}%</div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center py-4">
-                <div className="text-xl font-semibold text-slate-400">decidiendo…</div>
-                <div className="mt-2 text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}% &lt; umbral {(threshold * 100).toFixed(0)}%</div>
-              </div>
-            )}
-          </Widget>
-
-          {/* barras de confianza de la ventana actual */}
-          <Widget title="Confianza (ventana actual)" accent="metric">
-            <div className="space-y-3 py-2">
-              {last ? Object.keys(last.probs).map((cls) => (
-                <div key={cls}>
-                  <div className="mb-1 flex justify-between text-sm text-slate-600">
-                    <span>{cls}</span><span className="font-mono">{(last.probs[cls] * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${last.probs[cls] * 100}%`, background: colorOf(cls) }} />
-                  </div>
-                </div>
-              )) : <div className="text-center text-slate-300">—</div>}
-            </div>
-          </Widget>
-
-          {/* leyenda */}
-          <Widget title="Clases" accent="metric">
-            <div className="space-y-2 py-2 text-sm text-slate-600">
-              {classes.map((cls) => (
-                <div key={cls} className="flex items-center gap-2">
-                  <span className="inline-block h-3 w-5 rounded" style={{ background: colorOf(cls) }} /> {cls}
-                </div>
-              ))}
-            </div>
-          </Widget>
-
-          {/* evolución de la confianza */}
-          <div className="lg:col-span-3">
-            <Widget title="Evolución de la confianza (últimas ventanas)" accent="signal">
-              <UPlotChart data={EMPTY} options={chartOptions} height={200} onCreate={(u) => (chartU.current = u)} />
-            </Widget>
-          </div>
-        </div>
+        <GridBoard widgets={widgets} storageKey="liveLayout-v1" />
       )}
     </PageShell>
   )

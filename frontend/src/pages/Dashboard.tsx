@@ -1,31 +1,15 @@
 import {
-  createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
-  type ReactNode, type PointerEvent as ReactPointerEvent,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react'
 import type uPlot from 'uplot'
-import { GripVertical, RotateCcw, Radio, Check, X } from 'lucide-react'
+import { Radio, Check, X } from 'lucide-react'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { UPlotChart } from '../components/charts/UPlotChart'
+import { GridBoard, type GridWidget } from '../components/GridBoard'
+import { FillChart } from '../components/charts/FillChart'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream } from '../api/client'
-
-// ---- cuadrícula propia (drag + resize con snap, sin dependencias) ----
-const COLS = 12
-const ROW_H = 52
-const GAP = 16
-const LS_KEY = 'dashboardLayout-v3'
-
-type Accent = 'signal' | 'fir' | 'csp' | 'brain' | 'metric' | 'neutral'
-interface Item { i: string; x: number; y: number; w: number; h: number; minW: number; minH: number }
-
-const DEFAULT_LAYOUT: Item[] = [
-  { i: 'raw', x: 0, y: 0, w: 6, h: 4, minW: 4, minH: 3 },
-  { i: 'filt', x: 6, y: 0, w: 6, h: 4, minW: 4, minH: 3 },
-  { i: 'conf', x: 0, y: 4, w: 8, h: 4, minW: 4, minH: 3 },
-  { i: 'decision', x: 8, y: 4, w: 4, h: 4, minW: 3, minH: 3 },
-]
 
 const HELP: HelpContent = {
   pipeline: 'El pipeline completo en vivo, paso a paso',
@@ -48,31 +32,22 @@ const useLive = () => {
   return c
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-function loadLayout(): Item[] {
-  try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw) as Item[] } catch { /* */ }
-  return DEFAULT_LAYOUT
-}
-
-const WIDGETS: { i: string; title: string; accent: Accent; el: ReactNode }[] = [
-  { i: 'raw', title: 'Señal cruda', accent: 'signal', el: <SignalTrace kind="raw" /> },
-  { i: 'filt', title: 'Señal filtrada (µ/β, causal)', accent: 'fir', el: <SignalTrace kind="filt" /> },
-  { i: 'conf', title: 'Confianza del clasificador en el tiempo', accent: 'metric', el: <ConfidenceTrace /> },
-  { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', el: <DecisionSummary /> },
+const WIDGETS: GridWidget[] = [
+  { i: 'raw', title: 'Señal cruda', accent: 'signal', w: 6, h: 4, minW: 4, minH: 3, el: <SignalTrace kind="raw" /> },
+  { i: 'filt', title: 'Señal filtrada (µ/β, causal)', accent: 'fir', w: 6, h: 4, minW: 4, minH: 3, el: <SignalTrace kind="filt" /> },
+  { i: 'conf', title: 'Confianza del clasificador en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, el: <ConfidenceTrace /> },
+  { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, el: <DecisionSummary /> },
 ]
 
 export default function Dashboard() {
   const { dataset, subject, channel, playing, clearToken } = useStore()
   const fs = DATASETS[dataset].fs
-  const [items, setItems] = useState<Item[]>(loadLayout)
-  const [active, setActive] = useState<string | null>(null)
-  const [width, setWidth] = useState(0)
-  const containerRef = useRef<HTMLDivElement>(null)
 
   // ---- WebSocket único → bus de suscriptores ----
   const subs = useRef(new Set<(m: LiveMsg) => void>())
   const subscribe = useCallback((fn: (m: LiveMsg) => void) => {
-    subs.current.add(fn); return () => { subs.current.delete(fn) }
+    subs.current.add(fn)
+    return () => { subs.current.delete(fn) }
   }, [])
   useEffect(() => {
     if (!playing) return
@@ -83,49 +58,6 @@ export default function Dashboard() {
   }, [playing, dataset, subject, channel])
   const resetKey = `${clearToken}-${dataset}-${subject}-${channel}`
 
-  // ---- medición de ancho ----
-  useLayoutEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
-    ro.observe(el); setWidth(el.clientWidth)
-    return () => ro.disconnect()
-  }, [])
-  const colW = width > 0 ? (width - GAP * (COLS + 1)) / COLS : 0
-  const cell = useRef({ colW, rowH: ROW_H }); cell.current = { colW, rowH: ROW_H }
-
-  useEffect(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch { /* */ } }, [items])
-
-  const drag = useRef<{ id: string; mode: 'move' | 'resize'; sx: number; sy: number; o: Item } | null>(null)
-  const onMove = useCallback((e: PointerEvent) => {
-    const d = drag.current; if (!d) return
-    const { colW: cw, rowH } = cell.current
-    const dcx = Math.round((e.clientX - d.sx) / (cw + GAP))
-    const dcy = Math.round((e.clientY - d.sy) / (rowH + GAP))
-    setItems((prev) => prev.map((it) => {
-      if (it.i !== d.id) return it
-      if (d.mode === 'move') return { ...it, x: clamp(d.o.x + dcx, 0, COLS - it.w), y: Math.max(0, d.o.y + dcy) }
-      return { ...it, w: clamp(d.o.w + dcx, it.minW, COLS - it.x), h: Math.max(it.minH, d.o.h + dcy) }
-    }))
-  }, [])
-  const onUp = useCallback(() => {
-    drag.current = null; setActive(null)
-    window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp)
-  }, [onMove])
-  const start = (e: ReactPointerEvent, id: string, mode: 'move' | 'resize') => {
-    e.preventDefault()
-    const o = items.find((it) => it.i === id); if (!o) return
-    drag.current = { id, mode, sx: e.clientX, sy: e.clientY, o }; setActive(id)
-    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp)
-  }
-
-  const rows = items.reduce((m, it) => Math.max(m, it.y + it.h), 0)
-  const height = rows * (ROW_H + GAP) + GAP
-  const px = (it: Item) => ({
-    left: GAP + it.x * (colW + GAP), top: GAP + it.y * (ROW_H + GAP),
-    width: it.w * colW + (it.w - 1) * GAP, height: it.h * ROW_H + (it.h - 1) * GAP,
-  })
-
   return (
     <PageShell
       title="Dashboard libre"
@@ -133,70 +65,23 @@ export default function Dashboard() {
       help={HELP}
       world="online"
     >
-      <div className="mb-3 flex items-center justify-end gap-3">
-        <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-          <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido — pulsa Play'}
-        </span>
-        <button onClick={() => setItems(DEFAULT_LAYOUT)} className="flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-100">
-          <RotateCcw size={13} /> Restablecer disposición
-        </button>
-      </div>
-
       <LiveCtx.Provider value={{ subscribe, fs, resetKey }}>
-        <div ref={containerRef} className="relative rounded-xl border border-slate-200"
-          style={{ height: Math.max(height, 320), backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)', backgroundSize: '24px 24px' }}>
-          {colW > 0 && WIDGETS.map((w) => {
-            const it = items.find((x) => x.i === w.i); if (!it) return null
-            return (
-              <div key={w.i} className={`absolute ${active === w.i ? 'z-10' : 'z-0'}`}
-                style={{ ...px(it), transition: active === w.i ? 'none' : 'left .15s, top .15s, width .15s, height .15s' }}>
-                <Card title={w.title} accent={w.accent} dragging={active === w.i}
-                  onDragStart={(e) => start(e, w.i, 'move')} onResizeStart={(e) => start(e, w.i, 'resize')}>
-                  {w.el}
-                </Card>
-              </div>
-            )
-          })}
-        </div>
+        <GridBoard
+          widgets={WIDGETS}
+          storageKey="dashboardLayout-v4"
+          toolbar={
+            <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
+              <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido — pulsa Play'}
+            </span>
+          }
+        />
       </LiveCtx.Provider>
     </PageShell>
   )
 }
 
-function Card({ title, accent, children, onDragStart, onResizeStart, dragging }: {
-  title: string; accent: Accent; children: ReactNode
-  onDragStart: (e: ReactPointerEvent) => void; onResizeStart: (e: ReactPointerEvent) => void; dragging: boolean
-}) {
-  return (
-    <div className={`relative flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-card ${dragging ? 'border-primary ring-2 ring-primary/20' : 'border-slate-200'}`}
-      style={{ borderTop: `3px solid var(--accent-${accent})` }}>
-      <div onPointerDown={onDragStart} className="flex cursor-move touch-none select-none items-center gap-2 border-b border-slate-100 px-3 py-2">
-        <GripVertical size={14} className="text-slate-300" />
-        <span className="text-sm font-semibold text-slate-700">{title}</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden p-3">{children}</div>
-      <div onPointerDown={onResizeStart} className="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize touch-none"
-        style={{ background: 'linear-gradient(135deg, transparent 50%, #94a3b8 50%, #94a3b8 60%, transparent 60%, transparent 72%, #94a3b8 72%, #94a3b8 82%, transparent 82%)' }} />
-    </div>
-  )
-}
-
 // ---- Widgets en vivo ----
 const axis = (label: string) => ({ label, labelSize: 30, stroke: '#94a3b8', grid: { stroke: '#eef2f7', width: 1 }, font: '11px Geist Variable' })
-
-/** Gráfico uPlot que rellena la altura disponible del panel (mide su contenedor). */
-function FillChart({ data, options, onCreate }: {
-  data: uPlot.AlignedData; options: Omit<uPlot.Options, 'width' | 'height'>; onCreate: (u: uPlot) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [h, setH] = useState(0)
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return
-    const ro = new ResizeObserver(() => setH(el.clientHeight)); ro.observe(el); setH(el.clientHeight)
-    return () => ro.disconnect()
-  }, [])
-  return <div ref={ref} className="h-full w-full">{h > 20 && <UPlotChart data={data} options={options} height={h} onCreate={onCreate} />}</div>
-}
 
 function SignalTrace({ kind }: { kind: 'raw' | 'filt' }) {
   const { subscribe, fs, resetKey } = useLive()

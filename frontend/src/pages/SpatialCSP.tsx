@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { Widget } from '../components/Widget'
+import { GridBoard, type GridWidget } from '../components/GridBoard'
 import { Topomap, type Pos2D } from '../components/Topomap'
 import { EEGNetModel } from '../components/EEGNetModel'
 import { useStore } from '../store/useStore'
@@ -70,24 +70,32 @@ export default function SpatialCSP() {
       ) : !csp ? (
         <div className="flex h-64 items-center justify-center text-slate-300">Calculando CSP…</div>
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <Widget title="Patrones espaciales  (un filtro por componente)" accent="csp">
-              <div className="flex flex-wrap justify-around gap-2">
-                {csp.patterns.map((pat, ci) => (
-                  <div key={ci} className="text-center">
-                    <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={160} />
-                    <div className="text-xs text-slate-500">comp {ci} · <span className="font-mono">λ={csp.eigenvalues[ci].toFixed(2)}</span></div>
-                  </div>
-                ))}
-              </div>
-            </Widget>
-          </div>
-
-          <div className="space-y-4">
-            <Widget title="Separabilidad de clases (log-varianza)" accent="csp">
-              {scatter && (
-                <ResponsiveContainer width="100%" height={250}>
+        <GridBoard
+          storageKey="cspLayout-v1"
+          widgets={[
+            {
+              i: 'patterns',
+              title: 'Patrones espaciales  (un filtro por componente)',
+              accent: 'csp',
+              w: 8, h: 6, minW: 4, minH: 4,
+              el: (
+                <div className="flex flex-wrap justify-around gap-2">
+                  {csp.patterns.map((pat, ci) => (
+                    <div key={ci} className="text-center">
+                      <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={160} />
+                      <div className="text-xs text-slate-500">comp {ci} · <span className="font-mono">λ={csp.eigenvalues[ci].toFixed(2)}</span></div>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+            {
+              i: 'scatter',
+              title: 'Separabilidad de clases (log-varianza)',
+              accent: 'csp',
+              w: 4, h: 6, minW: 3, minH: 4,
+              el: scatter ? (
+                <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                   <ScatterChart margin={{ top: 8, right: 8, bottom: 20, left: 0 }}>
                     <CartesianGrid stroke="#eef2f7" />
                     <XAxis type="number" dataKey="x" name={`comp 0`} tick={{ fontSize: 11 }}
@@ -101,10 +109,10 @@ export default function SpatialCSP() {
                     ))}
                   </ScatterChart>
                 </ResponsiveContainer>
-              )}
-            </Widget>
-          </div>
-        </div>
+              ) : <div />,
+            } satisfies GridWidget,
+          ]}
+        />
       )}
     </PageShell>
   )
