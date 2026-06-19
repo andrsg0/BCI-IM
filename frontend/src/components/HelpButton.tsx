@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { HelpCircle, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useGlossary, findEntry, previewText, type GlossaryEntry } from '../lib/glossary'
 
 export interface HelpContent {
   /** etapa del pipeline a la que pertenece la sección (badge superior) */
@@ -13,9 +14,31 @@ export interface HelpContent {
   terms?: string[]
 }
 
+/** Chip de término clave: enlaza al glosario y muestra la definición al pasar el cursor. */
+function GlossaryChip({ term, entries, onNavigate }: { term: string; entries: GlossaryEntry[]; onNavigate: () => void }) {
+  const entry = useMemo(() => findEntry(term, entries), [term, entries])
+  return (
+    <span className="group relative inline-block">
+      <Link to={`/glossary?q=${encodeURIComponent(term)}`} onClick={onNavigate}
+        className="block rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/20">
+        {term}
+      </Link>
+      {entry && (
+        <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-64 -translate-x-1/2 group-hover:block">
+          <span className="block rounded-lg bg-slate-900 px-3 py-2 text-left text-xs leading-snug text-slate-100 shadow-xl">
+            <span className="mb-0.5 block font-semibold text-white">{entry.term}</span>
+            {previewText(entry.body)}
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
 /** Botón "?" que abre un panel explicando la sección actual. */
 export function HelpButton({ title, help }: { title: string; help: HelpContent }) {
   const [open, setOpen] = useState(false)
+  const entries = useGlossary()
 
   useEffect(() => {
     if (!open) return
@@ -63,12 +86,10 @@ export function HelpButton({ title, help }: { title: string; help: HelpContent }
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Términos clave</div>
                 <div className="flex flex-wrap gap-2">
                   {help.terms.map((term) => (
-                    <Link key={term} to={`/glossary?q=${encodeURIComponent(term)}`} onClick={() => setOpen(false)}
-                      className="rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/20">
-                      {term}
-                    </Link>
+                    <GlossaryChip key={term} term={term} entries={entries} onNavigate={() => setOpen(false)} />
                   ))}
                 </div>
+                <p className="mt-2 text-[11px] text-slate-400">Pasa el cursor sobre un término para ver su definición; haz clic para abrirlo en el glosario.</p>
               </div>
             )}
           </div>

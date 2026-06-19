@@ -224,3 +224,94 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
         },
     )
     return clf, card, data
+
+
+def _eegnet_features(cfg: dict, data: EpochedData):
+    """Prepara la señal para EEGNet: banda amplia 4–40 Hz + recorte a la ventana activa.
+
+    Devuelve ``(Xc, fs, kern_length, high)``. Es el mismo pre-proceso de
+    ``train_eegnet_subject`` (sin filtro µ/β ni CSP: la red aprende esos filtros).
+    """
+    from bci.dsp.convolution import apply_filter
+    from bci.dsp.fir_filters import design_bandpass_fir
+
+    fs = data.sfreq
+    win = cfg.get("classification_window")
+    high = float(min(40.0, fs / 2 - 1))
+    wide = design_bandpass_fir(4.0, high, fs, 101)
+    Xf = apply_filter(data.X, wide.h, mode="same")
+    Xc = Xf[:, :, int(win["tmin_rel"] * fs):int(win["tmax_rel"] * fs)] if win else Xf
+    return Xc, fs, int(fs // 2), high
+
+
+def train_eegnet_pooled(cfg: dict, dataset: str, subjects: list[int], epochs: int = 250,
+                        weight_decay: float = 1e-3, do_loso: bool = True, device: str | None = None):
+    """Entrena un EEGNet **pooled** (varios sujetos juntos) y mide generalización cross-subject.
+
+    A diferencia de CSP+LDA, que es **sujeto-específico**, aquí se prueba si una red puede
+    GENERALIZAR a un sujeto que NO vio. Se reportan dos cosas honestas:
+
+      - **LOSO** (leave-one-subject-out): para cada sujeto se entrena con TODOS los demás y
+        se evalúa en él. Es la estimación honesta de "ponérselo a un usuario nuevo" (sin
+        calibración). Suele ser bastante más baja que la within-subject.
+      - El **modelo final** que se guarda se entrena con TODOS los sujetos: es el modelo
+        BASE del que partiría un *fine-tuning* con una calibración corta del usuario nuevo.
+    """
+    from bci.models.eegnet import EEGNetClassifier, pick_device
+
+    cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
+    data = load_from_config(cfg)
+    y = np.asarray(data.y)
+    subj = data.metadata["subject"].to_numpy()
+
+    Xc, fs, kern, high = _eegnet_features(cfg, data)
+    n_classes = len(np.unique(y))
+    dev = pick_device(device)
+
+    def _new():
+        return EEGNetClassifier(n_classes=n_classes, epochs=epochs, kern_length=kern,
+                                weight_decay=weight_decay, device=dev)
+
+    # (1) LOSO: la estimación honesta de generalización a un sujeto nuevo (sin calibrar).
+    present = sorted(int(s) for s in np.unique(subj))
+    loso: dict[int, float] = {}
+    if do_loso and len(present) >= 2:
+        for s in present:
+            te = subj == s
+            tr = ~te
+            if len(np.unique(y[tr])) < 2 or te.sum() == 0:
+                continue
+            clf_s = _new().fit(Xc[tr], y[tr])
+            loso[s] = float(accuracy_score(y[te], clf_s.predict(Xc[te])))
+    loso_mean = float(np.mean(list(loso.values()))) if loso else 0.0
+
+    # (2) Modelo final pooled: entrenado con TODOS los sujetos (base para fine-tuning).
+    clf = _new().fit(Xc, y)
+    n_temporal = int(clf.model.temporal[0].weight.shape[0])
+
+    card = ModelCard(
+        dataset=dataset,
+        subject=0,                       # 0 = pooled (no pertenece a un sujeto concreto)
+        method="eegnet_pooled",
+        fs=float(fs),
+        classes=sorted(set(map(str, y))),
+        channels=list(data.ch_names),
+        holdout={"by": "loso", "subjects": present},
+        train_session=None,
+        n_train=int(data.n_trials),
+        n_demo=0,
+        accuracy=loso_mean,              # principal = media LOSO (honesto cross-subject)
+        kappa=0.0,
+        trained_on=date.today().isoformat(),
+        n_components=n_temporal,
+        fir={"low_hz": 4.0, "high_hz": high, "num_taps": 101},
+        extra={
+            "subjects": present,
+            "loso_per_subject": loso,
+            "loso_mean": loso_mean,
+            "device": dev,
+            "epochs": int(epochs),
+            "viz_trained_on": "all_subjects",
+        },
+    )
+    return clf, card, data

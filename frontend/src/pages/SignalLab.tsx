@@ -42,7 +42,7 @@ function reveal(arr: number[], idx: number): (number | null)[] {
 }
 
 export default function SignalLab() {
-  const { dataset, subject, channel, clearToken, playing } = useStore()
+  const { dataset, subject, channel, clearToken, playing, setProgress, resetProgress } = useStore()
   const fs = DATASETS[dataset].fs
 
   // El Laboratorio simula siempre la recepción en vivo del casco (mundo online).
@@ -53,7 +53,6 @@ export default function SignalLab() {
   const [high, setHigh] = useState(DEFAULTS.high)
   const [taps, setTaps] = useState(DEFAULTS.taps)
   const [filter, setFilter] = useState<FilterResp | null>(null)
-  const [headSec, setHeadSec] = useState(0)
   const [views, setViews] = useState<View[]>([
     { id: 0, channel, mode: 'raw' }, { id: 1, channel, mode: 'filtered' },
   ])
@@ -93,9 +92,11 @@ export default function SignalLab() {
   useEffect(() => { bandRef.current = { low, high } }, [low, high])
   useEffect(() => { modeRef.current = mode; overlay.current.causal = mode === 'live' }, [mode])
   useEffect(() => {
-    if (mat) { fsRef.current = mat.fs; totalRef.current = (mat.X[0].length - 1) / mat.fs; overlay.current.t = 0; setHeadSec(0) }
-  }, [mat])
-  useEffect(() => { overlay.current.t = 0; setHeadSec(0); verRef.current++ }, [clearToken])
+    if (mat) { fsRef.current = mat.fs; totalRef.current = (mat.X[0].length - 1) / mat.fs; overlay.current.t = 0; setProgress(0, totalRef.current) }
+  }, [mat, setProgress])
+  useEffect(() => { overlay.current.t = 0; setProgress(0, totalRef.current); verRef.current++ }, [clearToken, setProgress])
+  // al salir del Laboratorio limpiamos el progreso del panel lateral
+  useEffect(() => () => resetProgress(), [resetProgress])
 
   // recalcular la serie de cada vista (cruda o filtrada) al cambiar vistas/filtro/datos
   useEffect(() => {
@@ -121,11 +122,13 @@ export default function SignalLab() {
     let raf = 0, last = performance.now()
     const tick = (now: number) => {
       const dt = (now - last) / 1000; last = now
-      const { playing, loop, setPlaying } = useStore.getState()
+      const { playing, loop, setPlaying, setEnded } = useStore.getState()
       const total = totalRef.current
       if (playing && total > 0) {
+        // si se reanuda tras haber terminado, se vuelve a empezar desde el inicio
+        if (overlay.current.t >= total) overlay.current.t = 0
         overlay.current.t += dt
-        if (overlay.current.t >= total) { if (loop) overlay.current.t = 0; else { overlay.current.t = total; setPlaying(false) } }
+        if (overlay.current.t >= total) { if (loop) overlay.current.t = 0; else { overlay.current.t = total; setPlaying(false); setEnded(true) } }
       }
       const idx = overlay.current.t <= 0 ? -1 : Math.min((tFullLen() - 1), Math.floor(overlay.current.t * fsRef.current))
       if (idx !== applied.current.idx || verRef.current !== applied.current.ver) {
@@ -140,7 +143,7 @@ export default function SignalLab() {
         applied.current = { idx, ver: verRef.current }
       }
       const deci = Math.floor(overlay.current.t * 10)
-      if (deci !== deciRef.current) { deciRef.current = deci; setHeadSec(overlay.current.t) }
+      if (deci !== deciRef.current) { deciRef.current = deci; useStore.getState().setProgress(overlay.current.t, totalRef.current) }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -216,7 +219,7 @@ export default function SignalLab() {
           toolbar={
             <>
               <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido'} · {headSec.toFixed(1)} s
+                <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido'}
               </span>
               <button onClick={addView} className="flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-sm hover:bg-slate-100"><Plus size={15} /> Añadir gráfica</button>
             </>

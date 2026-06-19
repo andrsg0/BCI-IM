@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Html } from '@react-three/drei'
 import { DoubleSide } from 'three'
 import { divergingColor } from '../lib/color'
 
@@ -8,6 +9,7 @@ export type Pos3D = Record<string, [number, number, number] | null>
 // Mapeo de coordenadas MNE (x=derecha, y=anterior, z=arriba) a three.js
 // (x=derecha, y=arriba, z=frente). La nariz queda hacia +z.
 function Electrodes({ channels, pos3d, values }: { channels: string[]; pos3d: Pos3D; values: number[] }) {
+  const [hover, setHover] = useState<number | null>(null)
   const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1e-9)
   let maxNorm = 1e-9
   for (const ch of channels) {
@@ -23,10 +25,26 @@ function Electrodes({ channels, pos3d, values }: { channels: string[]; pos3d: Po
         if (!p) return null
         const t = values[i] / maxAbs
         const col = divergingColor(t)
+        const on = hover === i
         return (
-          <mesh key={ch} position={[p[0] * s, p[2] * s, p[1] * s]}>
-            <sphereGeometry args={[0.045, 20, 20]} />
+          <mesh
+            key={ch}
+            position={[p[0] * s, p[2] * s, p[1] * s]}
+            onPointerOver={(e) => { e.stopPropagation(); setHover(i); document.body.style.cursor = 'pointer' }}
+            onPointerOut={() => { setHover(null); document.body.style.cursor = 'auto' }}
+          >
+            <sphereGeometry args={[on ? 0.06 : 0.045, 20, 20]} />
             <meshStandardMaterial color={col} emissive={col} emissiveIntensity={0.25 + Math.abs(t) * 1.5} roughness={0.4} />
+            {on && (
+              <Html center distanceFactor={6} zIndexRange={[100, 0]} style={{ pointerEvents: 'none' }}>
+                <div className="whitespace-nowrap rounded-md bg-slate-900/90 px-2 py-1 text-center text-white shadow-lg">
+                  <div className="text-sm font-semibold leading-tight">{ch}</div>
+                  <div className="font-mono text-[11px] text-slate-300">
+                    {values[i] >= 0 ? '+' : ''}{values[i].toFixed(2)}
+                  </div>
+                </div>
+              </Html>
+            )}
           </mesh>
         )
       })}

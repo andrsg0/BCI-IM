@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Pause, Repeat, Trash2, Info, Activity, Settings, Check } from 'lucide-react'
+import { Play, Pause, Repeat, RotateCcw, Trash2, Info, Activity, Settings, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { DATASETS, DATASET_LIST } from '../../lib/datasets'
 
@@ -10,7 +10,7 @@ const ACCENT_PRESETS = ['#2563eb', '#0891b2', '#7c3aed', '#059669', '#e11d48', '
 
 export function Sidebar() {
   const {
-    dataset, subject, channel, playing, loop, status, latencyMs, logs, primaryColor,
+    dataset, subject, channel, playing, loop, ended, elapsedSec, totalSec, status, latencyMs, logs, primaryColor,
     setDataset, setSubject, setChannel, togglePlay, toggleLoop, clearViews, setPrimaryColor,
   } = useStore()
   const info = DATASETS[dataset]
@@ -67,8 +67,8 @@ export function Sidebar() {
               onClick={togglePlay}
               className="bg-primary hover:bg-primary-hover flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-white"
             >
-              {playing ? <Pause size={16} /> : <Play size={16} />}
-              {playing ? 'Pausa' : 'Play'}
+              {playing ? <Pause size={16} /> : ended ? <RotateCcw size={16} /> : <Play size={16} />}
+              {playing ? 'Pausa' : ended ? 'Volver a iniciar' : 'Play'}
             </button>
             <button
               onClick={toggleLoop}
@@ -85,6 +85,21 @@ export function Sidebar() {
               <Trash2 size={16} />
             </button>
           </div>
+          {/* Duración de la señal (solo informativa; el programa no la usa para clasificar) */}
+          {totalSec > 0 && (
+            <div className="space-y-1 pt-0.5">
+              <div className="flex justify-between font-mono text-[11px] text-slate-500">
+                <span>{elapsedSec.toFixed(1)} s</span>
+                <span className="text-slate-400">{totalSec.toFixed(0)} s</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="bg-primary h-full rounded-full transition-[width] duration-100 ease-linear"
+                  style={{ width: `${Math.min(100, (elapsedSec / totalSec) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-slate-400">La reproducción afecta solo a la página actual.</p>
         </section>
 

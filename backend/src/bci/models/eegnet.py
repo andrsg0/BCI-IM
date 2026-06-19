@@ -16,14 +16,22 @@ descubre por sí misma. Más adelante visualizaremos esos filtros aprendidos
 para comprobar que, efectivamente, redescubre la banda µ/β y la lateralización
 motora.
 
-Se entrena con PyTorch (CPU). El wrapper EEGNetClassifier ofrece fit/predict
-al estilo sklearn para integrarse con el resto del pipeline.
+Se entrena con PyTorch (GPU si está disponible, si no CPU). El wrapper
+EEGNetClassifier ofrece fit/predict al estilo sklearn para integrarse con el
+resto del pipeline.
 """
 from __future__ import annotations
 
 import numpy as np
 import torch
 import torch.nn as nn
+
+
+def pick_device(device: str | None = None) -> str:
+    """Elige el dispositivo de cómputo. ``None`` ⇒ 'cuda' si hay GPU, si no 'cpu'."""
+    if device is not None:
+        return device
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class EEGNet(nn.Module):
@@ -74,7 +82,7 @@ class EEGNetClassifier:
 
     def __init__(self, n_classes: int = 2, epochs: int = 250, lr: float = 1e-3,
                  batch_size: int = 32, kern_length: int = 64, dropout: float = 0.25,
-                 weight_decay: float = 0.0, seed: int = 42, device: str = "cpu"):
+                 weight_decay: float = 0.0, seed: int = 42, device: str | None = None):
         self.epochs = epochs
         self.lr = lr
         self.batch_size = batch_size
@@ -82,7 +90,7 @@ class EEGNetClassifier:
         self.dropout = dropout
         self.weight_decay = weight_decay   # regularización L2 (filtros más suaves)
         self.seed = seed
-        self.device = device
+        self.device = pick_device(device)   # None ⇒ GPU si está disponible
         self.n_classes = n_classes
         self.model: EEGNet | None = None
         self.classes_: np.ndarray | None = None
@@ -133,6 +141,13 @@ class EEGNetClassifier:
         logits = self.model(self._prep(np.asarray(X, dtype=np.float32)))
         idx = logits.argmax(dim=1).cpu().numpy()
         return self.classes_[idx]
+
+    @torch.no_grad()
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Probabilidades por clase (softmax de los logits). Útil para confianza/voto."""
+        self.model.eval()
+        logits = self.model(self._prep(np.asarray(X, dtype=np.float32)))
+        return torch.softmax(logits, dim=1).cpu().numpy()
 
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         return float(np.mean(self.predict(X) == np.asarray(y)))

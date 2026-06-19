@@ -30,6 +30,32 @@ export default function Home() {
       subtitle="Demostración práctica de sistemas LTI: convolución, filtros FIR, CSP y clasificación lineal."
       help={HELP}
     >
+      {/* Sobre el proyecto */}
+      <section className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-card">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">Sobre el proyecto</h2>
+        <p className="text-sm leading-relaxed text-slate-600">
+          Interfaz Cerebro-Computadora que clasifica <strong>imaginación motora</strong> (imaginar
+          mover la mano izquierda o derecha) a partir de señales EEG. El objetivo académico es hacer
+          la teoría de <strong>sistemas LTI</strong> explícita en el código —convolución, filtros FIR,
+          filtrado espacial CSP y respuesta en frecuencia— en lugar de ocultarla tras llamadas a
+          librerías. EEGNet (deep learning) aparece como espejo: sus capas imitan ese mismo pipeline,
+          pero aprendido de los datos.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {[
+            { k: 'Foco', v: 'Teoría LTI explícita', d: 'Convolución, FIR, CSP y frecuencia, a mano' },
+            { k: 'Datos', v: 'EEG público (MOABB)', d: 'Aún sin hardware; futuro casco vía LSL' },
+            { k: 'Tarea', v: '2 clases (izq./der.)', d: 'Techo realista del estado del arte: ~70–85 %' },
+          ].map((c) => (
+            <div key={c.k} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{c.k}</div>
+              <div className="mt-0.5 font-semibold text-slate-700">{c.v}</div>
+              <div className="mt-0.5 text-xs text-slate-400">{c.d}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Diagrama del pipeline (bloques clicables) */}
       <section className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-card">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">El pipeline</h2>
@@ -55,9 +81,36 @@ export default function Home() {
         </p>
       </section>
 
+      {/* Los dos mundos */}
+      <section className="mb-8">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">Los dos mundos del sistema</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+              <span className="font-semibold text-amber-700">Offline · antes de transmitir</span>
+            </div>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Lo que se calcula <strong>una vez</strong> con datos etiquetados: entrenar el modelo (CSP + LDA)
+              y validar su precisión. Secciones <strong>Entrenamiento</strong> y <strong>Resultados</strong>.
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              <span className="font-semibold text-emerald-700">Online · en tiempo real</span>
+            </div>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Lo que ocurre <strong>ahora</strong>, de forma causal: la señal llega y se clasifica ventana a
+              ventana. Secciones <strong>Laboratorio</strong>, <strong>Clasificación</strong> y <strong>Cerebro 3D</strong>.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Métricas clave por dataset */}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">Precisión por dataset (k-fold)</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">Precisión por dataset (k-fold, within-subject)</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           {DATASET_LIST.map((d) => (
             <div key={d.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">

@@ -53,7 +53,7 @@ export default function SpatialCSP() {
 
   return (
     <PageShell
-      title="El Modelo · Filtrado espacial (CSP)"
+      title="Entrenamiento · Filtrado espacial (CSP)"
       subtitle="Cómo se entrena el clasificador clásico y, como espejo, qué aprende EEGNet."
       help={HELP}
       world="offline"

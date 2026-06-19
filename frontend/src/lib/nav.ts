@@ -32,10 +32,10 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Entrenamiento',
+    label: 'Modelo',
     world: 'offline',
     items: [
-      { path: '/csp', label: 'El Modelo', icon: Network },
+      { path: '/csp', label: 'Entrenamiento', icon: Network },
       { path: '/results', label: 'Resultados', icon: BarChart3 },
     ],
   },

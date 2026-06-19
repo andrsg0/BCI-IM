@@ -17,8 +17,8 @@ const HELP: HelpContent = {
   intro: 'Representa sobre una cabeza tridimensional la actividad de la señal mientras se transmite en tiempo real. Cada electrodo del sistema 10-20 se ilumina según cuánto se desvía su potencia µ/β del promedio del cuero cabelludo en ese instante: así se ve qué regiones “se están usando” durante la imaginación motora.',
   points: [
     { label: 'Qué significa el brillo', desc: 'Cuanto más se aparta la potencia de un electrodo respecto a la media instantánea, más brilla. Durante la imaginación de una mano aparece una desincronización (ERD) sobre la corteza motora contraria (C3 para la mano derecha, C4 para la izquierda): esa lateralización es justo lo que el sistema explota para clasificar.' },
-    { label: 'Por qué en vivo', desc: 'A diferencia de los pesos fijos del CSP (que se ven en El Modelo), aquí los colores cambian ventana a ventana con la señal causal que llega, igual que la predicción. Pulsa Play en el panel lateral para iniciar la transmisión.' },
-    { label: 'Navegación', desc: 'Arrastra para rotar el modelo y usa la rueda para acercar o alejar. La nariz indica el frente de la cabeza.' },
+    { label: 'Por qué en vivo', desc: 'A diferencia de los pesos fijos del CSP (que se ven en Entrenamiento), aquí los colores cambian ventana a ventana con la señal causal que llega, igual que la predicción. Pulsa Play en el panel lateral para iniciar la transmisión.' },
+    { label: 'Navegación', desc: 'Arrastra para rotar el modelo y usa la rueda para acercar o alejar. La nariz indica el frente de la cabeza. Pasa el cursor sobre un electrodo para ver su nombre y el valor exacto de su desviación de potencia.' },
   ],
   terms: ['ERD/ERS', 'Banda µ/β', 'Sistema 10-20', 'Causalidad'],
 }
