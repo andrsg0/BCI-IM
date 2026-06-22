@@ -1,53 +1,561 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, Cell,
+} from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { GridBoard, type GridWidget } from '../components/GridBoard'
-import { DATASET_LIST } from '../lib/datasets'
+import {
+  fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, STATUS_LABEL,
+  type DatasetResult, type SubjectRow, type ResultStatus, type AggregateResult,
+} from '../lib/results'
 
 const HELP: HelpContent = {
-  pipeline: 'Evaluación del pipeline completo',
-  intro: 'Resume el rendimiento del sistema —el mismo pipeline LTI (FIR → CSP → LDA)— aplicado a distintos conjuntos de datos públicos de imaginación motora, sin modificar el código, únicamente la configuración. Sirve para valorar de forma objetiva la calidad del método y comparar entre poblaciones.',
+  pipeline: 'Evaluación comparativa del sistema',
+  intro: 'Compara de forma honesta los dos métodos (CSP+LDA clásico y EEGNet) en dos escenarios: within-subject (calibrado en la misma persona) y cross-subject (usuario nuevo sin calibrar). Todos los números salen del pipeline real; no hay valores inventados.',
   points: [
-    { label: 'Cómo se mide', desc: 'La precisión (accuracy) se obtiene por validación cruzada y de forma independiente para cada sujeto (within-subject), porque los patrones EEG varían mucho de una persona a otra y no sería válido mezclarlas. Se reporta el promedio sobre los sujetos.' },
-    { label: 'Por qué varía entre datasets', desc: 'Cada dataset emplea distinto número de sujetos, de canales y frecuencia de muestreo. La precisión tiende a disminuir cuando hay menos trials por sujeto: estimar la matriz de covarianza que necesita el CSP con pocos datos resulta inestable, un efecto conocido como maldición de la dimensionalidad.' },
-    { label: 'Variabilidad entre personas', desc: 'Algunos sujetos producen una desincronización (ERD) clara y otros apenas la generan, fenómeno denominado «BCI illiteracy». Por ese motivo siempre se informa la media sobre sujetos y nunca un único caso, que podría ser engañoso.' },
+    { label: 'Within vs cross', desc: 'Within-subject entrena y evalúa en el MISMO sujeto (techo con calibración). Cross-subject (LOSO) entrena con los demás y evalúa en el excluido: estima cómo rendiría con un usuario nuevo sin calibrar. La cross siempre es más baja.' },
+    { label: 'Rango, no solo media', desc: 'La precisión varía muchísimo entre personas (BCI illiteracy). Por eso se muestra el rango min–max entre sujetos, no únicamente el promedio, que podría engañar.' },
+    { label: 'Significancia', desc: 'El test de Wilcoxon pareado indica si la diferencia entre métodos es estadísticamente real o podría ser azar (p < 0.05 = significativa).' },
+    { label: 'Línea de azar', desc: 'En clasificación binaria el azar es 50%. Cualquier barra debe leerse respecto a esa línea, no respecto a cero.' },
   ],
-  terms: ['Validación cruzada', 'Accuracy y kappa', 'CSP'],
+  terms: ['Validación cruzada', 'Accuracy y kappa', 'CSP', 'EEGNet'],
 }
 
-const WIDGETS: GridWidget[] = [
-  {
-    i: 'datasets',
-    title: 'Comparativa de datasets (accuracy k-fold)',
-    accent: 'metric',
-    w: 7, h: 6, minW: 4, minH: 4,
-    el: (
-      <div className="space-y-3 p-1">
-        {DATASET_LIST.map((d) => (
-          <div key={d.id}>
-            <div className="mb-1 flex justify-between text-sm text-slate-600">
-              <span>{d.label}</span>
-              <span className="font-semibold">{(d.accuracy * 100).toFixed(1)}%</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${d.accuracy * 100}%` }} />
-            </div>
-            <div className="mt-0.5 text-xs text-slate-400">{d.subjects} sujetos · {d.fs} Hz</div>
-          </div>
-        ))}
+const STATUS_STYLE: Record<ResultStatus, string> = {
+  measured: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  partial: 'bg-amber-100 text-amber-700 border-amber-200',
+  pending: 'bg-slate-100 text-slate-500 border-slate-200',
+}
+
+function StatusBadge({ status }: { status: ResultStatus }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[status]}`}>
+      {STATUS_LABEL[status]}
+    </span>
+  )
+}
+
+function Card({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
+        {right}
       </div>
-    ),
-  },
+      {children}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Resumen: leaderboard de datasets (within-subject CSP+LDA) con barras de rango.
+// ---------------------------------------------------------------------------
+function Overview({ index, selected, onSelect }: {
+  index: DatasetResult[]
+  selected: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <Card title="Resumen por dataset · CSP+LDA within-subject (media y rango)">
+      <div className="space-y-3">
+        {index.map((d) => {
+          const s = d.summary['csp_within_acc']
+          const active = d.id === selected
+          return (
+            <button
+              key={d.id}
+              onClick={() => onSelect(d.id)}
+              className={`block w-full rounded-lg border p-3 text-left transition ${active ? 'border-emerald-400 bg-emerald-50/40' : 'border-slate-200 hover:border-slate-300'}`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  {d.label}
+                  <StatusBadge status={d.status} />
+                </span>
+                <span className="font-semibold text-slate-800">{s ? pct(s.mean) : '—'}</span>
+              </div>
+              {s ? (
+                <RangeBar min={s.min} max={s.max} mean={s.mean} chance={d.chance} />
+              ) : (
+                <p className="text-xs text-slate-400">Sin evaluación disponible.</p>
+              )}
+              <div className="mt-1 text-xs text-slate-400">
+                {d.n_subjects_evaluated} sujetos evaluados · {d.fs} Hz
+                {s && <> · rango {pct(s.min)}–{pct(s.max)}</>}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
+/** Barra horizontal que muestra el rango min–max con un marcador en la media y la línea de azar. */
+function RangeBar({ min, max, mean, chance }: { min: number; max: number; mean: number; chance: number }) {
+  return (
+    <div className="relative h-3 w-full rounded-full bg-slate-100">
+      <div className="absolute top-0 h-3 rounded-full bg-emerald-200"
+        style={{ left: `${min * 100}%`, width: `${(max - min) * 100}%` }} />
+      <div className="absolute top-[-2px] h-[18px] w-[3px] rounded bg-emerald-600"
+        style={{ left: `calc(${mean * 100}% - 1px)` }} title={`media ${pct(mean)}`} />
+      <div className="absolute top-[-2px] h-[18px] w-px bg-slate-400"
+        style={{ left: `${chance * 100}%` }} title={`azar ${pct(chance)}`} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Matriz 2×2: CSP+LDA vs EEGNet × within vs cross.
+// ---------------------------------------------------------------------------
+function MatrixTable({ r }: { r: DatasetResult }) {
+  const m = r.matrix
+  const cellCls = (v: number | null, best: boolean) =>
+    `rounded-lg p-3 text-center ${v === null ? 'bg-slate-50 text-slate-300'
+      : best ? 'bg-emerald-50 ring-1 ring-emerald-300' : 'bg-slate-50'}`
+  const bestWithin = pickBest(m.csp.within, m.eegnet.within)
+  const bestCross = pickBest(m.csp.cross, m.eegnet.cross)
+
+  return (
+    <Card title="Comparación de métodos (2×2)" right={<StatusBadge status={r.status} />}>
+      <div className="grid grid-cols-[auto_1fr_1fr] gap-2 text-sm">
+        <div />
+        <div className="text-center text-xs font-semibold uppercase text-slate-400">Within-subject</div>
+        <div className="text-center text-xs font-semibold uppercase text-slate-400">Cross-subject (LOSO)</div>
+
+        <div className="flex items-center text-xs font-semibold text-slate-500">CSP+LDA</div>
+        <div className={cellCls(m.csp.within, bestWithin === 'csp')}>
+          <div className="text-lg font-bold text-slate-800">{pct(m.csp.within)}</div>
+        </div>
+        <div className={cellCls(m.csp.cross, bestCross === 'csp')}>
+          <div className="text-lg font-bold text-slate-800">{pct(m.csp.cross)}</div>
+        </div>
+
+        <div className="flex items-center text-xs font-semibold text-slate-500">EEGNet</div>
+        <div className={cellCls(m.eegnet.within, bestWithin === 'eegnet')}>
+          <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.within)}</div>
+        </div>
+        <div className={cellCls(m.eegnet.cross, bestCross === 'eegnet')}>
+          <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.cross)}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1 text-xs text-slate-500">
+        <p>Azar = {pct(r.chance)} · {r.classes.join(' vs ')}</p>
+        <SignificanceNote label="Within" sig={r.significance.within} />
+        <SignificanceNote label="Cross" sig={r.significance.cross} />
+        {!r.has_compare && <p className="text-amber-600">EEGNet/cross no evaluado en este dataset todavía (solo CSP+LDA within).</p>}
+      </div>
+    </Card>
+  )
+}
+
+function pickBest(a: number | null, b: number | null): 'csp' | 'eegnet' | null {
+  if (a === null && b === null) return null
+  if (b === null) return 'csp'
+  if (a === null) return 'eegnet'
+  return a >= b ? 'csp' : 'eegnet'
+}
+
+function SignificanceNote({ label, sig }: { label: string; sig?: { p: number; n: number } }) {
+  if (!sig) return null
+  const signif = sig.p < 0.05
+  return (
+    <p>
+      {label}: diferencia CSP+LDA vs EEGNet {signif
+        ? <span className="font-semibold text-emerald-700">significativa</span>
+        : <span className="text-slate-500">no significativa</span>} (Wilcoxon p = {sig.p.toFixed(3)}, n = {sig.n})
+    </p>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Vista general agregada: matriz 2×2 sobre TODA la población (no por dataset).
+// ---------------------------------------------------------------------------
+const ROLE_TAG: Record<string, string> = {
+  live: 'demo en vivo',
+  training: 'entrenamiento',
+}
+
+function AggregateMatrix({ a }: { a: AggregateResult }) {
+  const m = a.matrix
+  const bestWithin = pickBest(m.csp.within, m.eegnet.within)
+  const bestCross = pickBest(m.csp.cross, m.eegnet.cross)
+  const cellCls = (v: number | null, best: boolean) =>
+    `rounded-lg p-3 text-center ${v === null ? 'bg-slate-50 text-slate-300'
+      : best ? 'bg-emerald-50 ring-1 ring-emerald-300' : 'bg-slate-50'}`
+  const nOf = (metric: string) => a.summary[metric]?.n ?? 0
+
+  const cols: { key: string; label: string }[] = [
+    { key: 'csp_within_acc', label: 'CSP within' },
+    { key: 'csp_cross_acc', label: 'CSP cross' },
+    { key: 'eegnet_within_acc', label: 'EEGNet within' },
+    { key: 'eegnet_cross_acc', label: 'EEGNet cross' },
+  ]
+
+  return (
+    <Card title="Comparación general de métodos · toda la población">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,360px)_1fr]">
+        {/* Matriz 2×2 agregada */}
+        <div>
+          <div className="grid grid-cols-[auto_1fr_1fr] gap-2 text-sm">
+            <div />
+            <div className="text-center text-xs font-semibold uppercase text-slate-400">Within</div>
+            <div className="text-center text-xs font-semibold uppercase text-slate-400">Cross (LOSO)</div>
+
+            <div className="flex items-center text-xs font-semibold text-slate-500">CSP+LDA</div>
+            <div className={cellCls(m.csp.within, bestWithin === 'csp')}>
+              <div className="text-lg font-bold text-slate-800">{pct(m.csp.within)}</div>
+              <div className="text-[10px] text-slate-400">n={nOf('csp_within_acc')}</div>
+            </div>
+            <div className={cellCls(m.csp.cross, bestCross === 'csp')}>
+              <div className="text-lg font-bold text-slate-800">{pct(m.csp.cross)}</div>
+              <div className="text-[10px] text-slate-400">n={nOf('csp_cross_acc')}</div>
+            </div>
+
+            <div className="flex items-center text-xs font-semibold text-slate-500">EEGNet</div>
+            <div className={cellCls(m.eegnet.within, bestWithin === 'eegnet')}>
+              <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.within)}</div>
+              <div className="text-[10px] text-slate-400">n={nOf('eegnet_within_acc')}</div>
+            </div>
+            <div className={cellCls(m.eegnet.cross, bestCross === 'eegnet')}>
+              <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.cross)}</div>
+              <div className="text-[10px] text-slate-400">n={nOf('eegnet_cross_acc')}</div>
+            </div>
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-slate-500">
+            <p>Pooled por sujeto sobre {a.n_datasets} datasets evaluados · azar 50% · n = nº de sujetos.</p>
+            <SignificanceNote label="Within" sig={a.significance.within} />
+            <SignificanceNote label="Cross" sig={a.significance.cross} />
+          </div>
+        </div>
+
+        {/* Desglose por dataset (honestidad: qué aporta cada uno) */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-left uppercase text-slate-400">
+                <th className="px-2 py-1.5">Dataset</th>
+                <th className="px-2 py-1.5">Suj.</th>
+                {cols.map((c) => <th key={c.key} className="px-2 py-1.5">{c.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {a.per_dataset.filter((d) => d.n > 0).map((d) => (
+                <tr key={d.id} className="border-b border-slate-100">
+                  <td className="px-2 py-1.5 text-slate-700">
+                    {d.label}
+                    {d.role && <span className="ml-1 text-[10px] text-slate-400">· {ROLE_TAG[d.role] ?? d.role}</span>}
+                  </td>
+                  <td className="px-2 py-1.5 tabular-nums text-slate-500">{d.n}</td>
+                  {cols.map((c) => (
+                    <td key={c.key} className="px-2 py-1.5 tabular-nums text-slate-700">
+                      {c.key in d.cells ? pct(d.cells[c.key]) : '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11px] text-slate-400">
+            «—» = método/escenario aún no evaluado en ese dataset. La fila de demo en vivo (2a)
+            se incluye solo aquí, como comparación científica de métodos.
+          </p>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Gráfico por sujeto: barras de accuracy por sujeto con línea de azar.
+// ---------------------------------------------------------------------------
+type Metric = 'csp_within_acc' | 'csp_cross_acc' | 'eegnet_within_acc' | 'eegnet_cross_acc'
+const METRIC_LABEL: Record<Metric, string> = {
+  csp_within_acc: 'CSP+LDA within',
+  csp_cross_acc: 'CSP+LDA cross',
+  eegnet_within_acc: 'EEGNet within',
+  eegnet_cross_acc: 'EEGNet cross',
+}
+
+function SubjectChart({ r, metric, onPick, selected }: {
+  r: DatasetResult
+  metric: Metric
+  onPick: (s: number) => void
+  selected: number | null
+}) {
+  const data = (r.subjects ?? []).map((s) => ({ subject: `S${s.subject}`, id: s.subject, val: s[metric] ?? null }))
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: -16 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+        <XAxis dataKey="subject" tick={{ fontSize: 11 }} interval={0} />
+        <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}`} tick={{ fontSize: 11 }} />
+        <Tooltip formatter={(v) => pct(typeof v === 'number' ? v : null)} labelFormatter={(l) => `Sujeto ${l}`} />
+        <ReferenceLine y={r.chance} stroke="#94a3b8" strokeDasharray="4 4"
+          label={{ value: 'azar', position: 'insideTopRight', fontSize: 10, fill: '#94a3b8' }} />
+        <Bar dataKey="val" radius={[3, 3, 0, 0]} onClick={(_, i) => onPick(data[i].id)} cursor="pointer">
+          {data.map((d) => (
+            <Cell key={d.id} fill={d.id === selected ? '#059669' : '#34d399'} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Tabla por sujeto, ordenable. Clic en una fila abre la ficha de detalle.
+// ---------------------------------------------------------------------------
+const COLS: { key: keyof SubjectRow; label: string; fmt: (v: unknown) => string }[] = [
+  { key: 'subject', label: 'Sujeto', fmt: (v) => `S${v}` },
+  { key: 'n_trials', label: 'Trials', fmt: (v) => (v == null ? '—' : String(v)) },
+  { key: 'csp_within_acc', label: 'CSP within', fmt: (v) => pct(v as number) },
+  { key: 'csp_within_kappa', label: 'κ', fmt: (v) => kappa(v as number) },
+  { key: 'csp_inter_acc', label: 'CSP inter-sesión', fmt: (v) => pct(v as number) },
+  { key: 'csp_cross_acc', label: 'CSP cross', fmt: (v) => pct(v as number) },
+  { key: 'eegnet_within_acc', label: 'EEGNet within', fmt: (v) => pct(v as number) },
+  { key: 'eegnet_cross_acc', label: 'EEGNet cross', fmt: (v) => pct(v as number) },
 ]
 
+function SubjectTable({ r, selected, onPick }: {
+  r: DatasetResult
+  selected: number | null
+  onPick: (s: number) => void
+}) {
+  const [sortKey, setSortKey] = useState<keyof SubjectRow>('subject')
+  const [asc, setAsc] = useState(true)
+  const rows = useMemo(() => {
+    const arr = [...(r.subjects ?? [])]
+    arr.sort((a, b) => {
+      const av = a[sortKey], bv = b[sortKey]
+      if (av == null) return 1
+      if (bv == null) return -1
+      return asc ? (av as number) - (bv as number) : (bv as number) - (av as number)
+    })
+    return arr
+  }, [r.subjects, sortKey, asc])
+
+  // Solo mostramos columnas que tengan algún dato en este dataset.
+  const cols = COLS.filter((c) => c.key === 'subject' || c.key === 'n_trials'
+    || rows.some((row) => row[c.key] != null))
+
+  const click = (k: keyof SubjectRow) => {
+    if (k === sortKey) setAsc(!asc)
+    else { setSortKey(k); setAsc(k === 'subject') }
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+            {cols.map((c) => (
+              <th key={String(c.key)} className="cursor-pointer select-none px-2 py-2 hover:text-slate-600"
+                onClick={() => click(c.key)}>
+                {c.label}{sortKey === c.key ? (asc ? ' ▲' : ' ▼') : ''}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.subject}
+              onClick={() => onPick(row.subject)}
+              className={`cursor-pointer border-b border-slate-100 ${row.subject === selected ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}>
+              {cols.map((c) => (
+                <td key={String(c.key)} className="px-2 py-1.5 tabular-nums text-slate-700">
+                  {c.fmt(row[c.key])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ficha de detalle de un sujeto.
+// ---------------------------------------------------------------------------
+function SubjectDetail({ r, subject }: { r: DatasetResult; subject: number }) {
+  const s = (r.subjects ?? []).find((x) => x.subject === subject)
+  if (!s) return null
+  const items: { label: string; v: string }[] = [
+    { label: 'Trials', v: s.n_trials == null ? '—' : String(s.n_trials) },
+    { label: 'CSP+LDA within (acc / κ)', v: `${pct(s.csp_within_acc)} / ${kappa(s.csp_within_kappa)}` },
+    ...(r.has_intersession ? [{ label: 'CSP+LDA inter-sesión (acc / κ)', v: `${pct(s.csp_inter_acc)} / ${kappa(s.csp_inter_kappa)}` }] : []),
+    ...(r.has_compare ? [
+      { label: 'CSP+LDA cross (LOSO)', v: pct(s.csp_cross_acc) },
+      { label: 'EEGNet within', v: pct(s.eegnet_within_acc) },
+      { label: 'EEGNet cross (LOSO)', v: pct(s.eegnet_cross_acc) },
+    ] : []),
+  ]
+  const best = s.csp_within_acc
+  const illiteracy = best != null && best < r.chance + 0.1
+  return (
+    <Card title={`Ficha del sujeto S${subject}`}>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        {items.map((it) => (
+          <div key={it.label} className="flex flex-col">
+            <dt className="text-xs text-slate-400">{it.label}</dt>
+            <dd className="font-medium tabular-nums text-slate-700">{it.v}</dd>
+          </div>
+        ))}
+      </dl>
+      {illiteracy && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Rendimiento cercano al azar ({pct(r.chance)}): posible caso de «BCI illiteracy»
+          (desincronización µ/β débil), no necesariamente un fallo del método.
+        </p>
+      )}
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ficha del modelo pooled (generalización cross-subject) + provenance.
+// ---------------------------------------------------------------------------
+function PooledCard({ r }: { r: DatasetResult }) {
+  const p = r.pooled
+  if (!p) return null
+  const prov: { label: string; v: string }[] = [
+    { label: 'Media LOSO (cross-subject)', v: pct(p.loso_mean) },
+    { label: 'Sujetos en el pool', v: String(p.n_subjects ?? '—') },
+    { label: 'Trials de entrenamiento', v: String(p.n_train ?? '—') },
+    { label: 'Épocas', v: String(p.epochs ?? '—') },
+    { label: 'Aumentación', v: p.augment ? `sí (×${p.augment_copies})` : 'no' },
+    { label: 'Dispositivo', v: p.device ?? '—' },
+    { label: 'Banda FIR', v: p.fir ? `${p.fir.low_hz}–${p.fir.high_hz} Hz` : '—' },
+    { label: 'Canales', v: String(p.n_channels ?? '—') },
+    { label: 'Entrenado', v: p.trained_on ?? '—' },
+  ]
+  return (
+    <Card title="Modelo EEGNet pooled · generalización a usuario nuevo">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+        {prov.map((it) => (
+          <div key={it.label} className="flex flex-col">
+            <dt className="text-xs text-slate-400">{it.label}</dt>
+            <dd className="font-medium tabular-nums text-slate-700">{it.v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-xs text-slate-500">
+        El modelo base se entrena con TODOS los sujetos (punto de partida para un
+        fine-tuning con calibración corta). La media LOSO es la estimación honesta de
+        ponérselo a alguien que el modelo nunca vio, sin calibrar.
+      </p>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Página.
+// ---------------------------------------------------------------------------
 export default function Results() {
+  const [index, setIndex] = useState<DatasetResult[] | null>(null)
+  const [aggregate, setAggregate] = useState<AggregateResult | null>(null)
+  const [selected, setSelected] = useState<string>('')
+  const [detail, setDetail] = useState<DatasetResult | null>(null)
+  const [subject, setSubject] = useState<number | null>(null)
+  const [metric, setMetric] = useState<Metric>('csp_within_acc')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Resultados = benchmark de métodos: solo datasets de ENTRENAMIENTO
+    // (los de demo en vivo viven en la sección «Demo en vivo»).
+    fetchResultsIndex()
+      .then((all) => {
+        const training = all.filter((d) => d.role === 'training')
+        setIndex(training)
+        setSelected((cur) => cur || training[0]?.id || '')
+      })
+      .catch((e) => setError(String(e)))
+    fetchAggregate().then(setAggregate).catch(() => { /* opcional */ })
+  }, [])
+
+  useEffect(() => {
+    if (!selected) return
+    setDetail(null)
+    setSubject(null)
+    fetchDatasetResult(selected).then((d) => {
+      setDetail(d)
+      // métrica por defecto: la cross si existe, si no la within
+      setMetric(d.has_compare ? 'csp_cross_acc' : 'csp_within_acc')
+    }).catch((e) => setError(String(e)))
+  }, [selected])
+
+  const availMetrics = useMemo<Metric[]>(() => {
+    if (!detail) return ['csp_within_acc']
+    return (Object.keys(METRIC_LABEL) as Metric[]).filter(
+      (m) => (detail.subjects ?? []).some((s) => s[m] != null))
+  }, [detail])
+
   return (
     <PageShell
       title="Resultados"
-      subtitle="El mismo pipeline en distintos datasets públicos."
+      subtitle="Benchmark de métodos sobre la población: CSP+LDA vs EEGNet, within vs cross-subject. (El modelo concreto que corre la demo está en «Demo en vivo».)"
       help={HELP}
       world="offline"
     >
-      <GridBoard widgets={WIDGETS} storageKey="resultsLayout-v1" />
+      {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">Error: {error}</p>}
+
+      {aggregate && <div className="mb-4"><AggregateMatrix a={aggregate} /></div>}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
+        {/* Columna izquierda: resumen / selector */}
+        <div className="space-y-4">
+          {index ? (
+            <Overview index={index} selected={selected} onSelect={setSelected} />
+          ) : (
+            <Card title="Resumen"><Skeleton /></Card>
+          )}
+        </div>
+
+        {/* Columna derecha: detalle del dataset seleccionado */}
+        <div className="space-y-4">
+          {detail ? (
+            <>
+              <MatrixTable r={detail} />
+
+              {(detail.subjects?.length ?? 0) > 0 && (
+                <Card
+                  title="Resultados por sujeto"
+                  right={
+                    <select
+                      value={metric}
+                      onChange={(e) => setMetric(e.target.value as Metric)}
+                      className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                    >
+                      {availMetrics.map((m) => (
+                        <option key={m} value={m}>{METRIC_LABEL[m]}</option>
+                      ))}
+                    </select>
+                  }
+                >
+                  <SubjectChart r={detail} metric={metric} onPick={setSubject} selected={subject} />
+                  <div className="mt-4">
+                    <SubjectTable r={detail} selected={subject} onPick={setSubject} />
+                  </div>
+                  <p className="mt-2 text-xs text-slate-400">Clic en una barra o fila para ver la ficha del sujeto.</p>
+                </Card>
+              )}
+
+              {subject != null && <SubjectDetail r={detail} subject={subject} />}
+
+              <PooledCard r={detail} />
+            </>
+          ) : (
+            <Card title="Detalle"><Skeleton /></Card>
+          )}
+        </div>
+      </div>
     </PageShell>
   )
+}
+
+function Skeleton() {
+  return <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
 }

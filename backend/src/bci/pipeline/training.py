@@ -227,25 +227,36 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
 
 
 def _eegnet_features(cfg: dict, data: EpochedData):
-    """Prepara la señal para EEGNet: banda amplia 4–40 Hz + recorte a la ventana activa.
+    """Prepara la señal para EEGNet: filtro pasa-banda + recorte a la ventana activa.
 
-    Devuelve ``(Xc, fs, kern_length, high)``. Es el mismo pre-proceso de
-    ``train_eegnet_subject`` (sin filtro µ/β ni CSP: la red aprende esos filtros).
+    Devuelve ``(Xc, fs, kern_length, high)``. Por defecto usa una banda amplia
+    4–40 Hz (la red aprende sus propios filtros µ/β dentro de ella). Pero la banda
+    es **configurable por dataset** vía la sección ``eegnet`` del YAML, porque en
+    datasets con artefactos fuertes fuera de la banda MI (p. ej. Dreyer2023: deriva
+    lenta/ocular en 4–13 Hz) la banda amplia hace que EEGNet —libre de aprender lo
+    que sea— se sobreajuste al artefacto y colapse, mientras CSP (restringido a
+    potencia de banda) es inmune. Restringir la entrada a beta (13–30 Hz) lo rescata
+    (verificado: Dreyer S3 0.44 → 0.85, sin dañar 2a). Es un caso donde el sesgo
+    inductivo LTI (elegir la banda) salva al modelo de deep learning.
     """
     from bci.dsp.convolution import apply_filter
     from bci.dsp.fir_filters import design_bandpass_fir
 
     fs = data.sfreq
     win = cfg.get("classification_window")
-    high = float(min(40.0, fs / 2 - 1))
-    wide = design_bandpass_fir(4.0, high, fs, 101)
-    Xf = apply_filter(data.X, wide.h, mode="same")
+    eeg_cfg = cfg.get("eegnet") or {}
+    low = float(eeg_cfg.get("band_low", 4.0))
+    high = min(float(eeg_cfg.get("band_high", 40.0)), fs / 2 - 1)
+    band = design_bandpass_fir(low, high, fs, 101)
+    Xf = apply_filter(data.X, band.h, mode="same")
     Xc = Xf[:, :, int(win["tmin_rel"] * fs):int(win["tmax_rel"] * fs)] if win else Xf
     return Xc, fs, int(fs // 2), high
 
 
 def train_eegnet_pooled(cfg: dict, dataset: str, subjects: list[int], epochs: int = 250,
-                        weight_decay: float = 1e-3, do_loso: bool = True, device: str | None = None):
+                        weight_decay: float = 1e-3, do_loso: bool = True, device: str | None = None,
+                        augment: bool = False, augment_copies: int = 2,
+                        loso_subset: int | None = None, verbose: bool = False):
     """Entrena un EEGNet **pooled** (varios sujetos juntos) y mide generalización cross-subject.
 
     A diferencia de CSP+LDA, que es **sujeto-específico**, aquí se prueba si una red puede
@@ -256,7 +267,17 @@ def train_eegnet_pooled(cfg: dict, dataset: str, subjects: list[int], epochs: in
         calibración). Suele ser bastante más baja que la within-subject.
       - El **modelo final** que se guarda se entrena con TODOS los sujetos: es el modelo
         BASE del que partiría un *fine-tuning* con una calibración corta del usuario nuevo.
+
+    Parámetros para escalar datos / cómputo:
+      - ``augment`` : aplica aumentación (ruido/desplazamiento/escala) SOLO al entrenamiento
+        de cada partición (nunca al test) — sube el rendimiento sin grabar más sujetos.
+      - ``loso_subset`` : limita el LOSO a los primeros N sujetos (cada uno se sigue
+        entrenando con TODOS los demás). Con muchos sujetos (p. ej. PhysioNet 109), evaluar
+        los 109 lleva horas; un subconjunto da una estimación honesta en una fracción del tiempo.
+        El modelo base final SIEMPRE se entrena con todos los sujetos.
+      - ``verbose`` : imprime el progreso del LOSO sujeto a sujeto (útil al correr en segundo plano).
     """
+    from bci.datasets.augment import augment_trials
     from bci.models.eegnet import EEGNetClassifier, pick_device
 
     cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
@@ -272,21 +293,31 @@ def train_eegnet_pooled(cfg: dict, dataset: str, subjects: list[int], epochs: in
         return EEGNetClassifier(n_classes=n_classes, epochs=epochs, kern_length=kern,
                                 weight_decay=weight_decay, device=dev)
 
+    def _fit_on(Xtr, ytr):
+        if augment:
+            Xtr, ytr = augment_trials(Xtr, ytr, copies=augment_copies)
+        return _new().fit(Xtr, ytr)
+
     # (1) LOSO: la estimación honesta de generalización a un sujeto nuevo (sin calibrar).
     present = sorted(int(s) for s in np.unique(subj))
+    loso_targets = present[:loso_subset] if loso_subset else present
     loso: dict[int, float] = {}
     if do_loso and len(present) >= 2:
-        for s in present:
+        for k, s in enumerate(loso_targets, 1):
             te = subj == s
             tr = ~te
             if len(np.unique(y[tr])) < 2 or te.sum() == 0:
                 continue
-            clf_s = _new().fit(Xc[tr], y[tr])
+            clf_s = _fit_on(Xc[tr], y[tr])
             loso[s] = float(accuracy_score(y[te], clf_s.predict(Xc[te])))
+            if verbose:
+                print(f"  [LOSO {k}/{len(loso_targets)}] sujeto {s:>3}: {loso[s]:.3f}", flush=True)
     loso_mean = float(np.mean(list(loso.values()))) if loso else 0.0
 
     # (2) Modelo final pooled: entrenado con TODOS los sujetos (base para fine-tuning).
-    clf = _new().fit(Xc, y)
+    if verbose:
+        print(f"  Entrenando modelo base con TODOS los sujetos ({len(present)})…", flush=True)
+    clf = _fit_on(Xc, y)
     n_temporal = int(clf.model.temporal[0].weight.shape[0])
 
     card = ModelCard(
@@ -307,10 +338,14 @@ def train_eegnet_pooled(cfg: dict, dataset: str, subjects: list[int], epochs: in
         fir={"low_hz": 4.0, "high_hz": high, "num_taps": 101},
         extra={
             "subjects": present,
+            "n_subjects": len(present),
             "loso_per_subject": loso,
+            "loso_subjects": loso_targets if (do_loso and len(present) >= 2) else [],
             "loso_mean": loso_mean,
             "device": dev,
             "epochs": int(epochs),
+            "augment": bool(augment),
+            "augment_copies": int(augment_copies) if augment else 0,
             "viz_trained_on": "all_subjects",
         },
     )

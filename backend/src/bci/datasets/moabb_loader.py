@@ -13,6 +13,7 @@ Nosotros la aplanamos a la tripleta estándar de ML: (X, y, metadata).
 """
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass, field
 
 import mne
@@ -87,6 +88,62 @@ def _get_dataset(name: str):
     return dataset_cls()
 
 
+def _download_with_retries(
+    dataset,
+    subjects: list[int],
+    *,
+    retries: int = 4,
+    timeout: int = 180,
+    verbose: bool = True,
+) -> list[int]:
+    """Descarga la caché de MNE **sujeto a sujeto** con reintentos y backoff.
+
+    MOABB baja todos los sujetos de golpe dentro de ``get_data``: si el servidor
+    (OSF en el caso de Dreyer2023) da un *read timeout*, revienta toda la corrida
+    y se pierde el progreso de los sujetos restantes. Aquí descargamos uno a uno
+    —lo ya cacheado se salta sin red— y reintentamos cada sujeto con backoff.
+
+    Además subimos el timeout de lectura de ``pooch`` (su default de 30 s es corto
+    para los .zip grandes de OSF, que a ratos se quedan colgados a mitad de
+    descarga). Es solo robustez de red; no toca la teoría LTI.
+
+    Devuelve la lista de sujetos que quedaron disponibles en caché (puede ser un
+    subconjunto si alguno es irrecuperable tras agotar los reintentos).
+    """
+    import time
+
+    try:  # subir el timeout de pooch de forma best-effort
+        import pooch.downloaders as _pd
+
+        _pd.DEFAULT_TIMEOUT = max(getattr(_pd, "DEFAULT_TIMEOUT", 30) or 30, timeout)
+    except Exception:  # noqa: BLE001 - si pooch cambia, seguimos con el default
+        pass
+
+    disponibles: list[int] = []
+    for s in subjects:
+        for intento in range(1, retries + 1):
+            try:
+                dataset.get_data(subjects=[s])  # cachea; si ya está, no baja nada
+                disponibles.append(s)
+                break
+            except Exception as exc:  # noqa: BLE001 - red flaky: reintentar
+                if verbose:
+                    print(
+                        f"[descarga] sujeto {s}: intento {intento}/{retries} falló "
+                        f"({type(exc).__name__}: {exc}).",
+                        flush=True,
+                    )
+                if intento == retries:
+                    if verbose:
+                        print(
+                            f"[descarga] sujeto {s}: OMITIDO tras {retries} intentos.",
+                            flush=True,
+                        )
+                else:
+                    time.sleep(min(5 * intento, 30))  # backoff lineal, tope 30 s
+    return disponibles
+
+
 def load_dataset(
     name: str,
     subjects: list[int],
@@ -115,7 +172,17 @@ def load_dataset(
         Corrección de línea base de MNE. ``None`` = sin corrección (señal cruda).
     """
     dataset = _get_dataset(name)
-    data = dataset.get_data(subjects=subjects)  # descarga a la caché de MNE si falta
+    # Descarga robusta sujeto a sujeto (reintentos + timeout largo) antes del
+    # get_data masivo: evita que un read-timeout de OSF tire toda la corrida.
+    disponibles = _download_with_retries(dataset, subjects)
+    if disponibles != subjects:
+        faltan = [s for s in subjects if s not in disponibles]
+        print(
+            f"[descarga] AVISO: sujetos no descargables omitidos: {faltan}. "
+            f"Se continúa con {len(disponibles)} sujetos.",
+            flush=True,
+        )
+        subjects = disponibles
 
     X_list: list[np.ndarray] = []
     y_list: list[str] = []
@@ -123,7 +190,14 @@ def load_dataset(
     ch_names: list[str] | None = None
     sfreq: float | None = None
 
+    # Cargamos y epochamos SUJETO A SUJETO en lugar de traer los Raw de todos los
+    # sujetos a la vez. Las señales continuas de MOABB pesan mucho más que los
+    # epochs recortados; con muchos sujetos (Dreyer2023 = 87 a 512 Hz) tenerlas
+    # todas en RAM agota la memoria (OOM → el sistema se congela y matan el proceso).
+    # Aquí solo acumulamos los arrays X compactos: el Raw de cada sujeto se libera
+    # (`del data` + gc) antes de pasar al siguiente, acotando el pico de memoria.
     for subject in subjects:
+        data = dataset.get_data(subjects=[subject])  # ya en caché: no baja red
         for session, runs in data[subject].items():
             for run, raw in runs.items():
                 # 1) Quedarnos solo con los canales pedidos (EEG: 22 canales).
@@ -156,7 +230,10 @@ def load_dataset(
                     ch_names = epochs.ch_names
                     sfreq = float(epochs.info["sfreq"])
 
-                X = epochs.get_data(copy=False)  # (n_trials, n_canales, n_muestras)
+                # copy=True para soltar el buffer de `epochs`/`raw` al liberar el sujeto.
+                # float32: MNE entrega float64, pero para EEG la precisión simple
+                # sobra y parte a la mitad la RAM de X_all (clave con 87 sujetos).
+                X = epochs.get_data(copy=True).astype(np.float32, copy=False)
                 # Etiqueta por trial: invertimos event_id (código -> nombre).
                 code_to_name = {v: k for k, v in event_id.items()}
                 labels = [code_to_name[c] for c in epochs.events[:, -1]]
@@ -167,6 +244,8 @@ def load_dataset(
                     {"subject": subject, "session": session, "run": run}
                     for _ in range(len(labels))
                 )
+        del data  # liberar los Raw de este sujeto antes del siguiente
+        gc.collect()
 
     if not X_list:
         raise RuntimeError(

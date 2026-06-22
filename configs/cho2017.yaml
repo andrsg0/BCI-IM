@@ -1,0 +1,63 @@
+# ============================================================
+# Configuración para Cho2017 (Corea).
+# Dataset para ENTRENAR el pooled cross-subject: 52 sujetos, 2 clases
+# nativas (mano izq./der.), 64 canales, 512 Hz, ~100-120 trials/clase.
+# 1 sola sesión -> bueno para entrenar, NO para "otro día" en vivo.
+# Reemplaza a Lee2019_MI (descartado: pesaba ~1.2 GB/sujeto y MOABB 1.5.0
+# solo exponía 1 de sus 2 sesiones; ver docs/datasets.md §3.1).
+# El fs NO se fija aquí: el pipeline lo toma de los datos (fs dinámico).
+# ============================================================
+
+dataset:
+  name: "Cho2017"
+  subjects: [1]
+  classes: ["left_hand", "right_hand"]   # binario, comparable con el 2a
+
+epoching:
+  # interval del dataset = [0, 3]: el cue de imaginación arranca en el onset
+  # de la anotación y dura ~3 s. Epocamos esa ventana completa.
+  tmin: 0.0
+  tmax: 3.0
+  picks: "eeg"           # 64 canales EEG
+  baseline: null
+
+# Ventana de imaginación activa: recorta el transitorio del cue y el borde del
+# FIR. [0.5, 2.5] s = 2 s, coherente con los demás datasets y con streaming.
+classification_window:
+  tmin_rel: 0.5
+  tmax_rel: 2.5
+
+# FIR pasa-banda µ/β. fs se sobreescribe con el real del dataset (512 Hz).
+fir_filter:
+  low_hz: 8.0
+  high_hz: 30.0
+  num_taps: 101
+  window: "hamming"
+  fs: 512                # solo informativo/fallback; manda el fs de los datos
+
+csp:
+  n_components: 4
+  log_variance: true
+  shrinkage: 0.0         # 64 canales pero ~200 trials/sujeto: no hace falta regularizar
+
+# Banda de entrada para EEGNet. Default beta 13–30 Hz por analogía con Dreyer2023
+# (512 Hz, mismo perfil → riesgo del artefacto en 4–13 Hz que hace colapsar a EEGNet
+# con banda ancha). PENDIENTE DE VERIFICAR con el barrido de bandas cuando baje la
+# data de Cho; si EEGNet aprende bien con 4–40, quitar esta sección. Ver
+# _eegnet_features() y la memoria 'eegnet-falla-en-dreyer'. No afecta a CSP+LDA.
+eegnet:
+  band_low: 13.0
+  band_high: 30.0
+
+classifier:
+  type: "lda"
+  cv_folds: 5
+
+streaming:
+  window_s: 2.0
+  step_s: 0.1
+  realtime_factor: 1.0
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"

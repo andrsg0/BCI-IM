@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 import numpy as np
@@ -32,13 +32,22 @@ from bci.pipeline.offline import MotorImageryPipeline
 from bci.pipeline.training import (
     load_card, load_model, model_paths, save_model, train_eegnet_subject, train_subject,
 )
+from bci.server import results as results_mod
 from bci.streaming.simulator import StreamSimulator
 
 # Registro de datasets: id -> (etiqueta, config, metadatos conocidos de la Etapa 1).
+# 'role' (ver docs/datasets.md) es la fuente única de la división por uso:
+#   'live'     = demo en vivo (≥2 sesiones, calibrar día1→probar día2). Hoy solo 2a.
+#   'training' = benchmark / pool cross-subject (muchos sujetos). PhysioNet/Dreyer/Cho/Liu.
+# La sección "Resultados" muestra los 'training'; "Demo en vivo" muestra los 'live'.
 REGISTRY = {
-    'BNCI2014_001': {'label': 'BCI IV 2a', 'config': 'configs/default.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.688},
-    'PhysionetMI': {'label': 'PhysioNet MMI', 'config': 'configs/physionet.yaml', 'subjects': 109, 'fs': 160, 'accuracy': 0.608},
-    'Liu2024': {'label': 'Liu2024', 'config': 'configs/liu2024.yaml', 'subjects': 50, 'fs': 500, 'accuracy': 0.536},
+    'BNCI2014_001': {'label': 'BCI IV 2a', 'config': 'configs/default.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.688, 'role': 'live'},
+    'PhysionetMI': {'label': 'PhysioNet MMI', 'config': 'configs/physionet.yaml', 'subjects': 109, 'fs': 160, 'accuracy': 0.608, 'role': 'training'},
+    'Liu2024': {'label': 'Liu2024', 'config': 'configs/liu2024.yaml', 'subjects': 50, 'fs': 500, 'accuracy': 0.536, 'role': 'training'},
+    # Datasets nuevos (ver docs/datasets.md). accuracy = provisional (medida en pocos
+    # sujetos); reemplazar por la media real con scripts/evaluate_all.py.
+    'Dreyer2023': {'label': 'Dreyer2023', 'config': 'configs/dreyer2023.yaml', 'subjects': 87, 'fs': 512, 'accuracy': 0.696, 'role': 'training'},
+    'Cho2017': {'label': 'Cho2017', 'config': 'configs/cho2017.yaml', 'subjects': 52, 'fs': 512, 'accuracy': 0.755, 'role': 'training'},
 }
 
 app = FastAPI(title='BCI · Imaginación Motora', version='0.2.0')
@@ -178,6 +187,52 @@ def glossary():
 @app.get('/api/datasets')
 def datasets():
     return [{'id': k, **{kk: vv for kk, vv in v.items() if kk != 'config'}} for k, v in REGISTRY.items()]
+
+
+# --- Resultados (sección Resultados) ---------------------------------------
+# Ensamblan los CSV/fichas que ya hay en disco (ver server/results.py). Caché de
+# proceso: se invalida reiniciando el servidor (igual que el resto de cachés).
+_results_cache: dict[str, dict] = {}
+
+
+def _processed_dir(dataset: str) -> Path:
+    return resolve_path(_config_for(dataset)['paths']['processed'])
+
+
+def _classes_of(dataset: str) -> list[str] | None:
+    return _config_for(dataset)['dataset'].get('classes')
+
+
+@app.get('/api/results')
+def results_index():
+    """Índice ligero: una tarjeta-resumen por dataset (sin la tabla por sujeto)."""
+    out = []
+    for did, meta in REGISTRY.items():
+        try:
+            out.append(results_mod.dataset_summary(
+                did, meta, _processed_dir(did), _classes_of(did)))
+        except Exception as exc:  # noqa: BLE001 - un dataset roto no tumba el índice
+            out.append({'id': did, 'label': meta.get('label', did),
+                        'status': 'pending', 'error': str(exc)})
+    return out
+
+
+@app.get('/api/results_aggregate')
+def results_aggregate():
+    """Vista general agregada: comparación de métodos sobre toda la población."""
+    datasets = [(did, meta, _processed_dir(did), _classes_of(did))
+                for did, meta in REGISTRY.items()]
+    return results_mod.aggregate_methods(datasets)
+
+
+@app.get('/api/results/{dataset}')
+def results_detail(dataset: str):
+    if dataset not in REGISTRY:
+        raise HTTPException(status_code=404, detail=f"dataset '{dataset}' no existe")
+    if dataset not in _results_cache:
+        _results_cache[dataset] = results_mod.dataset_results(
+            dataset, REGISTRY[dataset], _processed_dir(dataset), _classes_of(dataset))
+    return _results_cache[dataset]
 
 
 @app.get('/api/info')

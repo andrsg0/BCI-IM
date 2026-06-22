@@ -115,6 +115,39 @@ def design_bandpass_fir(
     return FIRFilter(h=h, fs=fs, low_hz=low_hz, high_hz=high_hz, window=window)
 
 
+def design_lowpass_fir(
+    cutoff_hz: float,
+    fs: float,
+    num_taps: int,
+    window: str = "hamming",
+) -> FIRFilter:
+    """Diseña un FIR pasa-BAJO con corte ``cutoff_hz`` por ventaneo (windowed-sinc).
+
+    Es el filtro ANTI-ALIASING del remuestreo (ver ``bci.dsp.resampling``): deja
+    pasar lo que está por debajo de ``cutoff_hz`` y atenúa lo de arriba, para que al
+    diezmar no se solape espectro (aliasing). Misma receta que el pasa-banda pero con
+    un solo pasa-bajos ideal:
+
+        h_ideal[m] = 2*fc*sinc(2*fc*m)      (fc = cutoff_hz/fs, m centrado en 0)
+
+    Normalizado a ganancia 1 en DC (suma de coeficientes = 1).
+    """
+    if num_taps % 2 == 0:
+        raise ValueError("num_taps debe ser impar para fase lineal tipo I.")
+    if not (0 < cutoff_hz < fs / 2):
+        raise ValueError("Debe cumplirse 0 < cutoff_hz < fs/2 (Nyquist).")
+
+    fc = cutoff_hz / fs
+    N = num_taps
+    m = np.arange(N) - (N - 1) / 2
+    h_ideal = 2 * fc * np.sinc(2 * fc * m)        # pasa-bajos ideal (sinc)
+    h = h_ideal * _window(window, N)              # truncar + ventanear (Gibbs)
+    s = np.sum(h)
+    if abs(s) > 1e-12:
+        h = h / s                                 # ganancia unidad en DC
+    return FIRFilter(h=h, fs=fs, low_hz=0.0, high_hz=cutoff_hz, window=window)
+
+
 def design_from_config(cfg: dict, fs: float | None = None) -> FIRFilter:
     """Diseña el FIR usando la sección 'fir_filter' del YAML.
 

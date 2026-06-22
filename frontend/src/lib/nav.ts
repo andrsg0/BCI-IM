@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Home, LayoutDashboard, Activity, Network, Brain, Radio, BarChart3, BookOpen } from 'lucide-react'
+import { Home, LayoutDashboard, Activity, Network, Brain, Radio, BarChart3, BookOpen, Gauge } from 'lucide-react'
 
 export interface NavItem {
   path: string
@@ -45,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/lab', label: 'Laboratorio', icon: Activity },
       { path: '/live', label: 'Clasificación', icon: Radio },
+      { path: '/demo', label: 'Demo en vivo', icon: Gauge },
       { path: '/brain', label: 'Cerebro 3D', icon: Brain },
     ],
   },

@@ -7,6 +7,7 @@ import SpatialCSP from './pages/SpatialCSP'
 import Brain3DPage from './pages/Brain3DPage'
 import LiveStream from './pages/LiveStream'
 import Results from './pages/Results'
+import LiveResults from './pages/LiveResults'
 import Glossary from './pages/Glossary'
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/csp" element={<SpatialCSP />} />
           <Route path="/brain" element={<Brain3DPage />} />
           <Route path="/live" element={<LiveStream />} />
+          <Route path="/demo" element={<LiveResults />} />
           <Route path="/results" element={<Results />} />
           <Route path="/glossary" element={<Glossary />} />
         </Route>

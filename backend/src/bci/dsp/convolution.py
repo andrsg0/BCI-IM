@@ -119,7 +119,13 @@ def apply_filter(X: np.ndarray, h: np.ndarray, mode: str = "same") -> np.ndarray
     longitud temporal y, como el FIR es de fase lineal, queda alineada con la
     entrada (se compensa el retardo de grupo (N-1)/2).
     """
-    X = np.asarray(X, dtype=float)
+    # Preservamos el dtype de punto flotante de entrada: con float64 (lo habitual)
+    # el comportamiento es idéntico, pero si entra float32 (datasets grandes
+    # pooled, p. ej. Dreyer2023 87 sujetos) NO duplicamos el array a float64 — eso
+    # evita un pico de memoria que disparaba el OOM. Entradas enteras -> float64.
+    X = np.asarray(X)
+    fdt = X.dtype if np.issubdtype(X.dtype, np.floating) else np.dtype(float)
+    X = np.asarray(X, dtype=fdt)
     h = np.asarray(h, dtype=float)
     n_time = X.shape[-1]
     out_len = {"full": n_time + len(h) - 1,
@@ -127,7 +133,7 @@ def apply_filter(X: np.ndarray, h: np.ndarray, mode: str = "same") -> np.ndarray
                "valid": n_time - len(h) + 1}[mode]
 
     flat = X.reshape(-1, n_time)
-    out = np.empty((flat.shape[0], out_len))
+    out = np.empty((flat.shape[0], out_len), dtype=fdt)
     for i in range(flat.shape[0]):
         out[i] = convolve(flat[i], h, mode=mode)
     return out.reshape(*X.shape[:-1], out_len)

@@ -26,7 +26,7 @@ Hoy CSP+LDA es **sujeto-específico** y EEGNet solo se usa para *visualizar* fil
       **Resultado (2a, 9 sujetos, 250 épocas):** media LOSO = **0.599** (rango 0.498–0.684;
       modelo base entrenado con 2538 trials). Es la generalización honesta a un sujeto nuevo
       *sin calibrar*: por encima del azar (0.50) pero bastante por debajo del within-subject
-      (~0.72 k-fold), lo que motiva el fine-tuning con calibración corta (siguiente paso).
+      (~0.69 k-fold), lo que motiva el fine-tuning con calibración corta (siguiente paso).
 - [ ] *Fine-tuning* con capas congeladas + calibración corta del sujeto nuevo
       (transfer learning), para acercarse al rendimiento sujeto-específico. (siguiente paso)
 - [ ] Exponer los resultados pooled/LOSO en el frontend (página de comparación estadística).
@@ -45,17 +45,24 @@ comparar de forma honesta el método clásico (CSP+LDA) con el de IA (EEGNet).
 
 Cuatro números medidos de forma **consistente** sobre el mismo dataset:
 
+Medido en 2a (9 sujetos, mismos folds, `compare_methods_BNCI2014_001.csv`):
+
 |            | within-subject (k-fold) | cross-subject (LOSO) |
 |------------|-------------------------|----------------------|
-| **CSP+LDA**| ~0.72 (ya medido)       | por medir (se espera ≈ azar: CSP es sujeto-específico) |
-| **EEGNet** | ~0.72 (ya medido)       | **0.599** (medido, 2a 9 sujetos) |
+| **CSP+LDA**| **0.688**               | 0.574                |
+| **EEGNet** | 0.626                   | **0.599**            |
+
+> **Nota:** el "~0.72" que figuraba antes era una **estimación redondeada**, no un valor
+> medido. El k-fold real de CSP+LDA en 2a siempre fue **0.688** (coincide exacto entre
+> `results_2a.csv` y `compare_methods`). No hubo regresión. La dispersión entre sujetos es
+> grande (0.51–0.91): reportar siempre el **rango**, no solo la media.
 
 - within-subject = entrenas y evalúas en el MISMO sujeto (calibrado).
 - cross-subject (LOSO) = entrenas con los DEMÁS y evalúas en el excluido (usuario nuevo
-  sin calibrar). El contraste CSP+LDA cross (rígido, ≈ azar) vs EEGNet cross (generaliza
-  algo) es el punto didáctico clave.
-- [ ] Script `scripts/compare_methods.py` que produce la matriz 2×2 + tabla por sujeto +
-      CSV, todo con los mismos folds. Mostrarla luego en el frontend (idea "comparación
+  sin calibrar). En 2a el CSP+LDA cross (0.574) no cae a azar porque los 9 sujetos comparten
+  el mismo montaje de 22 canales; aun así queda por debajo de EEGNet cross (0.599).
+- [x] Script `scripts/compare_methods.py` — HECHO. Produce la matriz 2×2 + tabla por sujeto +
+      CSV, todo con los mismos folds. Pendiente: mostrarla en el frontend (idea "comparación
       estadística", con κ además de accuracy).
 
 ### Plan de datos (para subir el rendimiento de EEGNet)
@@ -63,25 +70,44 @@ Cuatro números medidos de forma **consistente** sobre el mismo dataset:
 > **Realidad:** el techo del estado del arte de imaginación motora 2 clases no invasiva es
 > ~70–85 %. Objetivos honestos: cross-subject **sin calibrar** ≈ 0.65–0.70 (no 0.80);
 > por usuario **con calibración/fine-tuning** ≈ 0.75–0.80 (0.80–0.85 en buenos sujetos);
-> within-subject ya ~0.72 de media. Siempre reportar el **rango entre sujetos**, no solo la media.
+> within-subject ya ~0.69 de media (CSP+LDA en 2a). Siempre reportar el **rango entre
+> sujetos** (0.51–0.91), no solo la media.
 
-- [ ] **Paso 1 — Aumentación de datos (gratis, primero).** Sin datos nuevos: ventanas
-      deslizantes desplazadas (3–5 recortes por trial dentro del epoch), ruido gaussiano
-      leve, *mixup*, dropout de canales. Sube algo el cross y bastante el within.
-- [ ] **Paso 2 — Escalar sujetos con PhysionetMI (gran salto).** Reentrenar el pooled con
-      los ~109 sujetos de PhysioNet (vs 9 de 2a): lo que más mueve la aguja en cross-subject
-      es MÁS SUJETOS, no más trials. Expectativa: LOSO ~0.60 → ~0.65–0.70.
-      **Cómputo:** LOSO sobre un subconjunto (p. ej. 30–40 sujetos) y modelo base con los 109,
-      para no esperar horas. (decisión pendiente de confirmar)
+- [x] **Paso 1 — Aumentación de datos — HECHO (backend).** `bci/datasets/augment.py`:
+      `augment_trials()` aplica ruido gaussiano leve, desplazamiento temporal y escalado de
+      amplitud, **solo en la partición de entrenamiento** (no fuga de datos). Integrado en
+      `train_eegnet_pooled(augment=True, augment_copies=...)` y en el CLI (`--augment`).
+- [~] **Paso 2 — Escalar sujetos con PhysionetMI (gran salto) — LISTO PARA EJECUTAR.** El
+      script ya soporta el run grande: `--config ../configs/physionet.yaml`, los ~105 sujetos
+      (excluyendo 88/89/92/100), `--augment` y `--loso-subset N` (LOSO sobre un subconjunto;
+      modelo base con todos). **Proceso documentado en `docs/entrenamiento.md`** (comandos
+      exactos para correr en terminal propia, sin gastar tokens). Expectativa: LOSO ~0.60 →
+      ~0.65–0.70. Falta solo lanzarlo y registrar el resultado.
+      **PhysioNet ES la vía recomendada para EEGNet pooled** (verificado 2026-06-21: S2 0.622
+      con 11 suj, escala con datos).
+- [x] **RESUELTO: EEGNet en Dreyer2023 era un artefacto de BANDA.** Diagnóstico 2026-06-21:
+      EEGNet colapsaba a 0.500 porque, con banda amplia 4–40 Hz, se sobreajustaba a un
+      artefacto fuera de la banda MI (4–13 Hz: deriva/ocular/alfa); CSP (restringido a
+      potencia µ/β) era inmune. **Fix:** banda de EEGNet **configurable por dataset**
+      (`_eegnet_features` lee `cfg['eegnet']['band_low/high']`); Dreyer usa **beta 13–30 Hz**
+      → S3 0.44 → **0.854** (CSP 0.89), sin dañar 2a. Es un resultado pedagógico: el sesgo
+      inductivo LTI rescata al DL. Ver memoria `eegnet-falla-en-dreyer`. **Pendiente:**
+      re-lanzar EEGNet pooled de Dreyer con la banda nueva; verificar Cho2017 igual (también
+      512 Hz, probablemente mismo artefacto → ya tiene sentido darle su `eegnet:` band).
 - [ ] **Paso 4 — Fine-tuning con calibración corta.** Congelar capas tempranas del modelo
       base pooled y adaptar las últimas con 20–40 trials del usuario nuevo (1–2 runs). Es el
       paso que de verdad lleva a un usuario concreto hacia 0.75–0.85.
-- [ ] **Paso 3 — Pooling entre datasets (2a + PhysioNet + Liu) — AL FINAL.** Incluido a
-      petición del usuario porque cubre temas de su clase de **Sistemas Lineales y Señales**:
-      remuestreo a un fs común (interpolación/diezmado + filtro anti-aliasing), armonización
-      de montajes (subconjunto de canales motores común), y el efecto del filtrado FIR µ/β
-      sobre señales de distinta fs. Más variedad de datos, pero requiere esa ingeniería de
-      acondicionamiento de señal.
+- [~] **Paso 3 — Pooling entre datasets — IMPLEMENTADO (falta lanzar el run grande).** Cubre
+      temas de **Sistemas Lineales y Señales**: remuestreo racional L/M a un fs común (sobremuestreo
+      + filtro FIR anti-aliasing + diezmado) y armonización de montajes (19 canales motores comunes).
+      Hecho: `bci/dsp/resampling.py` (`resample_lti`, verificado corr=1.0 vs scipy y anti-aliasing OK),
+      `design_lowpass_fir` en `fir_filters.py`, y `scripts/train_eegnet_crossdataset.py` (LODO =
+      leave-one-dataset-out). **Proceso y parámetros documentados para la presentación en
+      `docs/remuestreo.md`.** Falta lanzar el entrenamiento grande y registrar resultados.
+      **Pool propuesto y criterios en `docs/datasets.md`**: PhysioNet (109) + **Dreyer2023 (87)**
+      + **Cho2017 (52)**, ambos ya integrados ≈ 248 sujetos. Lee2019_MI se **descartó** (pesaba
+      ~1.2 GB/sujeto y MOABB 1.5.0 solo exponía 1 de sus 2 sesiones — datasets.md §3.1).
+      Para EN VIVO (calibrar≠probar): 2a + Stieger2021 (11 sesiones, pendiente).
 
 - Refs: `pipeline/training.py` (`train_eegnet_pooled`, `_eegnet_features`),
   `scripts/train_eegnet_pooled.py`, `scripts/compare_methods.py`.
@@ -145,9 +171,20 @@ con electrodos; no es una malla anatómica y no carga ningún modelo.
 > **"Entrenamiento"**. Hecho en `lib/nav.ts`, título en `SpatialCSP.tsx`, y referencias
 > de texto en `LiveStream.tsx` y `Brain3DPage.tsx`.
 
-- [ ] **Precisión por sujeto** (no solo media k-fold por dataset). Mostrar la puntuación
-      de cada individuo en Resultados o en la página de Entrenamiento.
-      Ref actual: `pages/Results.tsx` solo muestra accuracy por dataset.
+- [x] **Precisión por sujeto — HECHO.** La nueva sección Resultados (`pages/Results.tsx`,
+      data-driven desde `/api/results`) muestra tabla ordenable + gráfico por sujeto con
+      las 4 celdas (CSP/EEGNet × within/cross), kappa, nº trials, rango min–max y línea de
+      azar, más una ficha de detalle por sujeto al hacer clic. Backend: `server/results.py`.
+- [x] **Vista GENERAL (matriz agregada) — HECHO.** Matriz 2×2 (EEGNet vs CSP+LDA × within vs
+      cross) agregando **por sujeto** sobre todos los datasets (un sujeto = un punto → pondera
+      por nº de sujetos). Endpoint `/api/results_aggregate` (`server/results.py:aggregate_methods`),
+      componente `AggregateMatrix` arriba de `pages/Results.tsx`. Incluye desglose por dataset
+      (con badge de rol) para no esconder la heterogeneidad, y Wilcoxon pooled. Resultado actual:
+      CSP within 0.624 vs EEGNet 0.547 (p=0.006, CSP mejor); cross 0.581 vs 0.561 (n.s.).
+- [ ] **Separar Resultados por ROL del dataset — ABIERTO.** ¿La sección Resultados debe
+      mostrar solo los datasets de entrenamiento del modelo general (PhysioNet/Dreyer/Cho)
+      y llevar los de demo en vivo (2a, calibrado/inter-sesión) a otra vista? Hoy `/api/results`
+      lista los 5 con badge de estado (measured/partial/pending). Decidir agrupación por rol.
 - [ ] **Leyenda de interpretación** del resultado (en cabecera o en el botón de info):
       explicar honestamente por qué varía la precisión (BCI illiteracy, calidad de señal,
       pocos trials), **sin inventar etiquetas** que el dataset no tiene.
