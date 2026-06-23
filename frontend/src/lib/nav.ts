@@ -65,3 +65,12 @@ export const WORLD_STYLE: Record<World, { dot: string; chip: string }> = {
 
 // Lista plana (compatibilidad / usos puntuales).
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
+
+/** Mundo al que pertenece una ruta (para que el panel lateral sepa si está en una
+ *  sección «en vivo» u «offline»). Rutas desconocidas → 'general'. */
+export function worldForPath(pathname: string): World {
+  for (const g of NAV_GROUPS) {
+    if (g.items.some((it) => it.path === pathname)) return g.world
+  }
+  return 'general'
+}

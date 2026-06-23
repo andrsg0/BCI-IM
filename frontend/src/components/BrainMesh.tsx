@@ -5,7 +5,7 @@ import {
   Vector3,
   Mesh,
   MeshStandardMaterial,
-  Raycaster,
+  DoubleSide,
   type Group,
   type IUniform,
 } from 'three'
@@ -99,7 +99,10 @@ export function BrainMesh({
     dirs.forEach((d, i) => { if (d && i < MAX_E) uDirs[i].copy(d) })
     const count = Math.min(dirs.filter(Boolean).length ? dirs.length : 0, MAX_E)
 
-    const mat = new MeshStandardMaterial({ color, roughness: 0.85, metalness: 0 })
+    // DoubleSide: el raycast respeta material.side, así el rayo impacta SIEMPRE la
+    // cara cercana (no la atraviesa hacia la interna) y el render del grupo espejado
+    // de Brain3D no se ve "del revés".
+    const mat = new MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: DoubleSide })
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uCount = { value: count }
       shader.uniforms.uDirs = { value: uDirs }
@@ -186,24 +189,27 @@ export function BrainMesh({
     if (uniforms.current) uniforms.current.uMaxAbs.value = maxAbs
   }, [values])
 
-  // Proyectar electrodos sobre la malla por raycast (dirección radial -> centro).
-  // Solo depende de la geometría y de las direcciones, no de los valores.
+  // Colocar electrodos sobre una CÁSCARA ELIPSOIDAL suave (el "cuero cabelludo"),
+  // no sobre la corteza bache a bache: el scalp real pasa por encima de los surcos
+  // —en especial la fisura interhemisférica de la línea media (Fz, Cz, POz…)—. Se
+  // toma la caja envolvente del cerebro en mundo (invariante al espejo de Brain3D) y
+  // se sitúa cada electrodo donde su dirección del montaje corta el elipsoide, con un
+  // pequeño margen para que floten justo por encima. Así NINGUNO se hunde y quedan en
+  // su dirección real del montaje (independiente de la quiralidad del modelo).
   useEffect(() => {
     const grp = groupRef.current
     if (!grp) return
     grp.updateWorldMatrix(true, true)
-    const ray = new Raycaster()
-    const center = new Vector3() // el cerebro queda centrado en el origen
+    const box = new Box3().setFromObject(grp)
+    const half = box.getSize(new Vector3()).multiplyScalar(0.5)
+    const ctr = box.getCenter(new Vector3())
+    const MARGIN = 1.1 // 10 % por encima de la superficie del cerebro
     const pts: SurfacePoint[] = dirs.map((d) => {
       if (!d) return null
-      const origin = d.clone().multiplyScalar(5) // muy fuera de la cabeza
-      ray.set(origin, d.clone().negate())         // disparo hacia el centro
-      const hit = ray.intersectObject(grp, true)[0]
-      const surf = hit
-        ? hit.point.clone().add(d.clone().multiplyScalar(0.015)) // apoyado, ligero offset
-        : d.clone().multiplyScalar(targetRadius)                  // fallback radial
-      surf.sub(center)
-      return [surf.x, surf.y, surf.z]
+      // s tal que ctr + s·d cae sobre el elipsoide de semiejes `half`
+      const inv = Math.hypot(d.x / (half.x || 1), d.y / (half.y || 1), d.z / (half.z || 1))
+      const s = (inv > 1e-9 ? 1 / inv : 1) * MARGIN
+      return [ctr.x + d.x * s, ctr.y + d.y * s, ctr.z + d.z * s]
     })
     onPoints(pts)
     // eslint-disable-next-line react-hooks/exhaustive-deps

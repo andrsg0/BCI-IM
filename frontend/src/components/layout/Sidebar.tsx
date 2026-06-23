@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { Play, Pause, Repeat, RotateCcw, Trash2, Info, Activity, Settings, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { Play, Pause, Repeat, RotateCcw, Trash2, Info, Activity, Settings, Check, Lock } from 'lucide-react'
 import { useStore } from '../../store/useStore'
-import { DATASETS, DATASET_LIST } from '../../lib/datasets'
+import { DATASETS, LIVE_DATASET_LIST } from '../../lib/datasets'
+import { worldForPath } from '../../lib/nav'
 
 const LEVEL_COLOR = { info: 'text-slate-500', warn: 'text-amber-600', error: 'text-red-600' }
 
@@ -11,10 +13,22 @@ const ACCENT_PRESETS = ['#2563eb', '#0891b2', '#7c3aed', '#059669', '#e11d48', '
 export function Sidebar() {
   const {
     dataset, subject, channel, playing, loop, ended, elapsedSec, totalSec, status, latencyMs, logs, primaryColor,
-    setDataset, setSubject, setChannel, togglePlay, toggleLoop, clearViews, setPrimaryColor,
+    setDataset, setSubject, setChannel, togglePlay, toggleLoop, clearViews, setPrimaryColor, setPlaying,
   } = useStore()
   const info = DATASETS[dataset]
   const [showSettings, setShowSettings] = useState(false)
+
+  // El panel lateral es el control de la DEMO EN VIVO: la reproducción solo tiene
+  // sentido en el mundo 'online'. En las secciones de modelo (offline) se desactiva.
+  const world = worldForPath(useLocation().pathname)
+  const liveMode = world === 'online'
+  const singleLive = LIVE_DATASET_LIST.length <= 1
+
+  // Al salir del mundo «en vivo», detener la reproducción para que el estado no quede
+  // como «Transmitiendo» en una sección de modelo (offline).
+  useEffect(() => {
+    if (!liveMode && playing) setPlaying(false)
+  }, [liveMode, playing, setPlaying])
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -23,15 +37,22 @@ export function Sidebar() {
         <section className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Fuente de datos</h2>
           <label className="block text-xs text-slate-500">Dataset</label>
-          <select
-            value={dataset}
-            onChange={(e) => setDataset(e.target.value as typeof dataset)}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
-          >
-            {DATASET_LIST.map((d) => (
-              <option key={d.id} value={d.id}>{d.label} · {d.fs} Hz</option>
-            ))}
-          </select>
+          {singleLive ? (
+            <div className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm font-medium text-slate-700">
+              {info.label} · {info.fs} Hz
+            </div>
+          ) : (
+            <select
+              value={dataset}
+              onChange={(e) => setDataset(e.target.value as typeof dataset)}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            >
+              {LIVE_DATASET_LIST.map((d) => (
+                <option key={d.id} value={d.id}>{d.label} · {d.fs} Hz</option>
+              ))}
+            </select>
+          )}
+          <p className="text-[11px] text-slate-400">Solo datasets aptos para la demo en vivo (≥2 sesiones).</p>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -59,19 +80,24 @@ export function Sidebar() {
           </div>
         </section>
 
-        {/* --- Reproducción --- */}
+        {/* --- Reproducción (solo activa en las secciones En vivo) --- */}
         <section className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Reproducción</h2>
-          <div className="flex gap-2">
+          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Reproducción
+            {!liveMode && <Lock size={11} className="text-slate-300" />}
+          </h2>
+          <div className={`flex gap-2 ${liveMode ? '' : 'pointer-events-none opacity-40'}`}>
             <button
               onClick={togglePlay}
-              className="bg-primary hover:bg-primary-hover flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-white"
+              disabled={!liveMode}
+              className="bg-primary hover:bg-primary-hover flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed"
             >
               {playing ? <Pause size={16} /> : ended ? <RotateCcw size={16} /> : <Play size={16} />}
               {playing ? 'Pausa' : ended ? 'Volver a iniciar' : 'Play'}
             </button>
             <button
               onClick={toggleLoop}
+              disabled={!liveMode}
               className={`rounded-md border px-3 py-2 ${loop ? 'border-primary/40 bg-primary/10 text-primary' : 'border-slate-300 text-slate-500 hover:bg-slate-100'}`}
               title="Repetir en bucle"
             >
@@ -79,14 +105,15 @@ export function Sidebar() {
             </button>
             <button
               onClick={clearViews}
+              disabled={!liveMode}
               className="rounded-md border border-slate-300 px-3 py-2 text-slate-500 hover:bg-slate-100"
               title="Limpiar vistas"
             >
               <Trash2 size={16} />
             </button>
           </div>
-          {/* Duración de la señal (solo informativa; el programa no la usa para clasificar) */}
-          {totalSec > 0 && (
+          {/* Duración de la señal (solo en vivo; informativa, no se usa para clasificar) */}
+          {liveMode && totalSec > 0 && (
             <div className="space-y-1 pt-0.5">
               <div className="flex justify-between font-mono text-[11px] text-slate-500">
                 <span>{elapsedSec.toFixed(1)} s</span>
@@ -100,7 +127,11 @@ export function Sidebar() {
               </div>
             </div>
           )}
-          <p className="text-[11px] text-slate-400">La reproducción afecta solo a la página actual.</p>
+          <p className="text-[11px] text-slate-400">
+            {liveMode
+              ? 'La reproducción afecta solo a la página actual.'
+              : 'Los controles de reproducción se activan en las secciones «En vivo» (Laboratorio, Clasificación, Cerebro 3D).'}
+          </p>
         </section>
 
         {/* --- Estado del sistema --- */}

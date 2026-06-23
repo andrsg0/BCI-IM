@@ -181,19 +181,25 @@ con electrodos; no es una malla anatómica y no carga ningún modelo.
       componente `AggregateMatrix` arriba de `pages/Results.tsx`. Incluye desglose por dataset
       (con badge de rol) para no esconder la heterogeneidad, y Wilcoxon pooled. Resultado actual:
       CSP within 0.624 vs EEGNet 0.547 (p=0.006, CSP mejor); cross 0.581 vs 0.561 (n.s.).
-- [ ] **Separar Resultados por ROL del dataset — ABIERTO.** ¿La sección Resultados debe
-      mostrar solo los datasets de entrenamiento del modelo general (PhysioNet/Dreyer/Cho)
-      y llevar los de demo en vivo (2a, calibrado/inter-sesión) a otra vista? Hoy `/api/results`
-      lista los 5 con badge de estado (measured/partial/pending). Decidir agrupación por rol.
+- [x] **Separar Resultados por ROL del dataset — DECIDIDO.** Resultados muestra los datasets
+      de **entrenamiento** del modelo general **+** cualquier dataset `live` que también se haya
+      usado para entrenar (tiene artefacto pooled/LOSO `d.pooled`). Regla en `Results.tsx`:
+      `d.role === 'training' || d.pooled != null`. Así BCI IV 2a (role `live`) aparece porque
+      tiene `model_BNCI2014_001_s0_eegnet_pooled` (LOSO 0.599); si se quitara ese pooled,
+      desaparecería de Resultados y quedaría solo en «Demo en vivo» / Datasets. Badge de rol
+      («demo en vivo · usado en pooled») en el `Overview` para no esconder la heterogeneidad.
 - [ ] **Leyenda de interpretación** del resultado (en cabecera o en el botón de info):
       explicar honestamente por qué varía la precisión (BCI illiteracy, calidad de señal,
       pocos trials), **sin inventar etiquetas** que el dataset no tiene.
   - **Decidido:** ver sección "Simulador de señal" — esto es la mitad "datos reales" de
     la decisión "ambas cosas".
-- [ ] **EEGNet: ficha de entrenamiento.** Mostrar cómo se entrenó el modelo (nº de trials,
-      banda, épocas, accuracy inter-sesión vs k-fold). Los datos ya están en la `ModelCard`
-      (`training.py:ModelCard.extra` ya guarda `accuracy_intersession`, `accuracy_kfold`,
-      `folds`, `viz_trained_on`). Falta exponerlos/mostrarlos en `components/EEGNetModel.tsx`.
+- [x] **EEGNet: ficha de entrenamiento — HECHO.** `components/EEGNetModel.tsx` muestra ahora
+      una ficha (nº de trials de entrenamiento, reservados para demo, banda de entrada, épocas,
+      nº de filtros temporales F1, fecha) + tabla de precisión honesta EEGNet vs CSP+LDA del
+      **mismo sujeto** (within-subject k-fold, inter-sesión y κ). `/api/eegnet` se amplió para
+      devolver esos campos (`n_train`, `n_demo`, `kappa`, `trained_on`, `epochs`, `fir`,
+      `n_temporal`, `csp_lda`); `train_eegnet_subject` guarda `epochs` en `extra`. Se eliminó el
+      "CSP+LDA: 0.72 / 0.74" **hardcodeado** (no era un valor medido) por la cifra real del modelo.
 - [ ] **Página de comparación estadística.** El estadístico que mencionó el ingeniero
       ("k² o algo así") es **κ — kappa de Cohen** (ya se calcula y guarda en `ModelCard.kappa`).
       Mostrar comparación accuracy vs kappa entre sujetos/datasets/métodos (CSP+LDA vs EEGNet).

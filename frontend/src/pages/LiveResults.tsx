@@ -3,6 +3,7 @@ import { ShieldCheck } from 'lucide-react'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
 import { useStore } from '../store/useStore'
+import { DatasetRolesNote } from '../components/DatasetRolesNote'
 import { getJSON } from '../api/client'
 import { DATASETS, type DatasetId } from '../lib/datasets'
 import { pct, kappa as fmtKappa, fetchResultsIndex } from '../lib/results'
@@ -112,6 +113,8 @@ export default function LiveResults() {
       help={HELP}
       world="online"
     >
+      <div className="mb-4"><DatasetRolesNote /></div>
+
       <div className="mb-4 flex items-center gap-3">
         <span className="text-sm text-slate-500">Modelo de:</span>
         {liveList.length > 1 ? (

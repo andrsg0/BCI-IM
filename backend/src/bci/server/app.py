@@ -114,6 +114,21 @@ def _ensure_model(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[
     return model, card
 
 
+def _load_card_if_exists(dataset: str, subject: int, method: str) -> dict | None:
+    """Lee SOLO de disco la ficha de un modelo ya entrenado; nunca entrena.
+
+    Para usos donde una ausencia debe degradar con gracia (p. ej. la comparación
+    CSP+LDA dentro de /api/eegnet) en vez de disparar un entrenamiento al vuelo."""
+    out_dir = resolve_path(_config_for(dataset)['paths']['processed'])
+    _, json_path = model_paths(out_dir, dataset, subject, method)
+    if not json_path.exists():
+        return None
+    try:
+        return load_card(json_path)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _get_pipeline(dataset: str, subject: int) -> MotorImageryPipeline:
     return _ensure_model(dataset, subject, 'csp_lda')[0]  # type: ignore[return-value]
 
@@ -219,9 +234,14 @@ def results_index():
 
 @app.get('/api/results_aggregate')
 def results_aggregate():
-    """Vista general agregada: comparación de métodos sobre toda la población."""
+    """Vista general agregada: comparación de métodos sobre toda la población.
+
+    Excluye los datasets de demo en vivo (role='live'): Resultados es solo el
+    benchmark de población (entrenamiento), coherente con la lista que muestra el
+    frontend. El dataset en vivo se ve en «Demo en vivo».
+    """
     datasets = [(did, meta, _processed_dir(did), _classes_of(did))
-                for did, meta in REGISTRY.items()]
+                for did, meta in REGISTRY.items() if meta.get('role') != 'live']
     return results_mod.aggregate_methods(datasets)
 
 
@@ -319,6 +339,95 @@ def model(dataset: str, subject: int = 1, method: str = 'csp_lda'):
     return _ensure_model(dataset, subject, method)[1]
 
 
+@app.get('/api/train_config')
+def train_config(dataset: str, subject: int = 1):
+    """Ficha de CONFIGURACIÓN del entrenamiento (mundo offline) para la sección
+    Entrenamiento: combina el YAML del dataset (parámetros de preprocesamiento,
+    CSP y validación) con la ficha del modelo CSP+LDA ya entrenado (si existe en
+    disco — NO entrena al vuelo). Centraliza lo que la página muestra como
+    «cómo se preparó la señal / cómo se validó / qué dataset es».
+    """
+    if dataset not in REGISTRY:
+        raise HTTPException(status_code=404, detail=f"dataset '{dataset}' no existe")
+    meta = REGISTRY[dataset]
+    cfg = _config_for(dataset)
+    card = _load_card_if_exists(dataset, subject, 'csp_lda')
+
+    fs = float(card['fs']) if card else float(meta.get('fs') or cfg['fir_filter'].get('fs', 0))
+    epo = cfg.get('epoching', {})
+    cw = cfg.get('classification_window', {})
+    fir = cfg.get('fir_filter', {})
+    csp_cfg = cfg.get('csp', {})
+    clf = cfg.get('classifier', {})
+
+    # Ventana de clasificación en segundos absolutos del trial (epoch + offset relativo).
+    tmin_rel = cw.get('tmin_rel'); tmax_rel = cw.get('tmax_rel')
+    win_abs = None
+    if tmin_rel is not None and tmax_rel is not None and epo.get('tmin') is not None:
+        win_abs = [float(epo['tmin']) + float(tmin_rel), float(epo['tmin']) + float(tmax_rel)]
+
+    num_taps = int(fir.get('num_taps', 0))
+    group_delay = (num_taps - 1) / 2 if num_taps else None  # muestras (fase lineal)
+
+    holdout = card.get('holdout') if card else None
+    if holdout and holdout.get('by') == 'session':
+        holdout_kind = 'inter-sesión'
+        holdout_desc = (f"entrena en «{card.get('train_session') or '0train'}», "
+                        f"evalúa en «{holdout.get('value')}»")
+    elif holdout:
+        holdout_kind = 'hold-out 30% estratificado'
+        holdout_desc = 'dataset de 1 sola sesión; se reserva un 30% estratificado'
+    else:
+        holdout_kind = None
+        holdout_desc = None
+
+    return {
+        'dataset': {
+            'id': dataset,
+            'label': meta.get('label', dataset),
+            'fs': fs,
+            'role': meta.get('role'),
+            'n_subjects': meta.get('subjects'),
+            'subject': subject,
+            'classes': cfg['dataset'].get('classes') or (card['classes'] if card else []),
+            'n_channels': len(card['channels']) if card else None,
+            'channels': card['channels'] if card else None,
+            'n_trials': (int(card['n_train']) + int(card['n_demo'])) if card else None,
+        },
+        'preprocessing': {
+            'epoching': {'tmin': epo.get('tmin'), 'tmax': epo.get('tmax')},
+            'classification_window': {
+                'tmin_rel': tmin_rel, 'tmax_rel': tmax_rel,
+                'abs_s': win_abs,
+                'len_s': (float(tmax_rel) - float(tmin_rel)) if (tmin_rel is not None and tmax_rel is not None) else None,
+            },
+            'fir': {
+                'low_hz': fir.get('low_hz'), 'high_hz': fir.get('high_hz'),
+                'num_taps': num_taps or None, 'window': fir.get('window'),
+                'group_delay_samples': group_delay,
+                'group_delay_ms': (group_delay / fs * 1000.0) if (group_delay and fs) else None,
+            },
+            'csp': {
+                'n_components': csp_cfg.get('n_components'),
+                'log_variance': csp_cfg.get('log_variance'),
+                'shrinkage': csp_cfg.get('shrinkage'),
+            },
+        },
+        'validation': {
+            'classifier': clf.get('type'),
+            'cv_folds': clf.get('cv_folds'),
+            'holdout_kind': holdout_kind,
+            'holdout_desc': holdout_desc,
+            'n_train': int(card['n_train']) if card else None,
+            'n_demo': int(card['n_demo']) if card else None,
+            'accuracy_intersession': float(card['accuracy']) if card else None,
+            'kappa': float(card['kappa']) if card else None,
+            'trained_on': card.get('trained_on') if card else None,
+        },
+        'has_model': card is not None,
+    }
+
+
 @app.get('/api/eegnet')
 def eegnet_info(dataset: str, subject: int = 1):
     """Filtros que EEGNet APRENDE (mundo offline) — el puente teoría ↔ IA.
@@ -345,6 +454,19 @@ def eegnet_info(dataset: str, subject: int = 1):
     Ws = mdl.spatial[0].weight.detach().cpu().numpy()[:, 0, :, 0]    # (F1*D, n_canales)
     pos2d, pos3d = _positions(card['channels'])
     extra = card.get('extra') or {}
+
+    # Comparación honesta sobre el MISMO sujeto: la ficha del CSP+LDA clásico
+    # (inter-sesión, la misma métrica que el principal de EEGNet). Antes había un
+    # "0.72 / 0.74" hardcodeado en el frontend que no correspondía a ningún valor
+    # medido; aquí se devuelve el número real del modelo entrenado.
+    csp_card = _load_card_if_exists(dataset, subject, 'csp_lda')
+    csp_cmp = None
+    if csp_card is not None:
+        csp_cmp = {
+            'accuracy_intersession': float(csp_card['accuracy']),
+            'kappa': float(csp_card['kappa']),
+        }
+
     return {
         'channels': card['channels'],
         'fs': fs,
@@ -357,6 +479,15 @@ def eegnet_info(dataset: str, subject: int = 1):
         'folds': extra.get('folds'),
         'kern_length': int(Wt.shape[1]),
         'pos2d': pos2d, 'pos3d': pos3d,
+        # --- ficha de entrenamiento ---
+        'n_train': int(card['n_train']),
+        'n_demo': int(card['n_demo']),
+        'kappa': float(card['kappa']),
+        'trained_on': card['trained_on'],
+        'epochs': extra.get('epochs'),
+        'fir': card['fir'],            # {low_hz, high_hz, num_taps} de la banda amplia
+        'n_temporal': int(Wt.shape[0]),
+        'csp_lda': csp_cmp,            # comparación same-subject (o None)
     }
 
 
@@ -394,6 +525,7 @@ def csp(dataset: str, subject: int = 1):
         'channels': data.ch_names,
         'eigenvalues': pipe.csp.eigenvalues_.tolist(),
         'patterns': pipe.csp.patterns_.T.tolist(),   # (n_componentes, n_canales)
+        'filters': pipe.csp.filters_.tolist(),       # W (n_componentes, n_canales): Z = W·X
         'classes': sorted(set(map(str, data.y))),
         'features': feats.tolist(),
         'labels': [str(c) for c in np.asarray(data.y)[idx_train]],
@@ -402,6 +534,139 @@ def csp(dataset: str, subject: int = 1):
     }
     _csp_cache[key] = resp
     return resp
+
+
+@app.get('/api/csp_signal')
+def csp_signal(dataset: str, subject: int = 1, component: int = 0):
+    """Señal de UN canal CRUDO vs la salida del componente CSP (Z = W·X) en el tiempo.
+
+    Didáctico (sección Entrenamiento): el electrodo más relevante del componente capta
+    una señal ruidosa; el filtro espacial CSP la combina con el resto de canales y
+    produce una «señal virtual» mucho más limpia. Se replica el pipeline real
+    (FIR → recorte a la ventana activa → CSP) sobre un trial de la clase que el
+    componente favorece. Ambas series se normalizan (z-score) para comparar formas,
+    ya que sus escalas (µV vs unidades de proyección) son muy distintas."""
+    data = _get_data(dataset, subject)
+    pipe = _get_pipeline(dataset, subject)
+    n_comp = int(pipe.csp.filters_.shape[0])
+    component = max(0, min(component, n_comp - 1))
+
+    # Electrodo con mayor |patrón| para el componente: el más relevante físicamente.
+    patt = np.abs(pipe.csp.patterns_[:, component])
+    ch_idx = int(np.argmax(patt))
+    ch_name = data.ch_names[ch_idx]
+
+    # Trial de la clase que el componente favorece (λ alto → clase 0; λ bajo → clase 1).
+    lam = float(pipe.csp.eigenvalues_[component])
+    classes = sorted(set(map(str, data.y)))
+    favored = classes[0] if lam >= 0.5 else classes[1]
+    y = np.asarray(list(map(str, data.y)))
+    cand = np.where(y == favored)[0]
+    trial = int(cand[0]) if len(cand) else 0
+
+    X = data.X[trial]                                     # (n_canales, n_muestras)
+    fs = float(data.sfreq)
+    Xf = apply_filter(X[None], pipe.filt.h, mode='same')[0]
+    crop = pipe._crop                                     # (i0, i1) en muestras
+    if crop is not None:
+        Xf = Xf[:, crop[0]:crop[1]]
+        Xraw = X[:, crop[0]:crop[1]]
+    else:
+        Xraw = X
+    z = pipe.csp.transform(Xf[None])[0, component, :]     # componente en el tiempo
+    raw = Xraw[ch_idx]
+
+    def zscore(a):
+        a = np.asarray(a, dtype=float)
+        s = float(a.std()) or 1.0
+        return ((a - a.mean()) / s).tolist()
+
+    return {
+        'fs': fs, 'component': component, 'n_components': n_comp,
+        'favored_class': favored, 'eigenvalue': lam,
+        'channel': ch_name, 'trial': trial,
+        't': (np.arange(raw.shape[0]) / fs).tolist(),
+        'raw': zscore(raw), 'csp': zscore(z),
+    }
+
+
+@app.get('/api/lda')
+def lda_info(dataset: str, subject: int = 1):
+    """Clasificador LINEAL (LDA) que cierra la cadena — sección Entrenamiento.
+
+    Devuelve lo necesario para visualizar la frontera de decisión y su rendimiento:
+      - weights/bias : la forma lineal del discriminante binario  y = w·F + b, con
+        ``y > 0`` ⇒ ``positive_class``. Es la diferencia de los dos discriminantes
+        gaussianos δ₀−δ₁ (los términos cuadráticos se cancelan ⇒ frontera = hiperplano).
+      - boundary2d   : un LDA reajustado SOLO sobre los dos componentes que se dibujan
+        en el scatter (comp 0 vs comp extremo), para trazar la recta en ESE plano.
+      - confusion    : matriz de confusión sobre la partición HELD-OUT (la que el modelo
+        nunca vio), junto a accuracy y κ honestos (coinciden con la ficha del modelo).
+    """
+    from sklearn.metrics import cohen_kappa_score, confusion_matrix
+
+    from bci.models.lda import LDA
+
+    data = _get_data(dataset, subject)
+    pipe = _get_pipeline(dataset, subject)
+    idx_train, idx_demo = _split_idx(dataset, subject)
+    classes = sorted(set(map(str, data.y)))
+    y = np.asarray(list(map(str, data.y)))
+
+    lda = pipe.lda
+    # Discriminante binario explícito y = w·F + b (δ₀ − δ₁): y>0 ⇒ clase 0.
+    if lda.coef_.shape[0] == 2:
+        w = (lda.coef_[0] - lda.coef_[1])
+        b = float(lda.intercept_[0] - lda.intercept_[1])
+        positive_class = classes[0]
+    else:  # multiclase (no esperado en binario): degradar a one-vs-rest de la 1ª clase
+        w = lda.coef_[0]
+        b = float(lda.intercept_[0])
+        positive_class = classes[0]
+
+    # Frontera en el plano 2D que se dibuja (comp 0 vs comp extremo).
+    feats_tr = pipe._features(data.X[idx_train])      # (n_train, n_componentes)
+    last = feats_tr.shape[1] - 1
+    lda2 = LDA().fit(feats_tr[:, [0, last]], y[idx_train])
+    if lda2.coef_.shape[0] == 2:
+        w2 = (lda2.coef_[0] - lda2.coef_[1]).tolist()
+        b2 = float(lda2.intercept_[0] - lda2.intercept_[1])
+    else:
+        w2 = lda2.coef_[0].tolist(); b2 = float(lda2.intercept_[0])
+
+    # Rendimiento honesto sobre el held-out (lo que el modelo nunca vio).
+    y_true = y[idx_demo]
+    y_pred = np.asarray(list(map(str, pipe.predict(data.X[idx_demo]))))
+    cm = confusion_matrix(y_true, y_pred, labels=classes).tolist()
+    acc = float(np.mean(y_pred == y_true)) if len(y_true) else 0.0
+    kappa = float(cohen_kappa_score(y_true, y_pred, labels=classes)) if len(y_true) else 0.0
+
+    cfg = _config_for(dataset)
+    clf_cfg = cfg.get('classifier', {})
+    card = _load_card_if_exists(dataset, subject, 'csp_lda')
+    holdout = card.get('holdout') if card else None
+    if holdout and holdout.get('by') == 'session':
+        holdout_kind = 'inter-sesión'
+    elif holdout:
+        holdout_kind = 'hold-out 30% estratificado'
+    else:
+        holdout_kind = 'hold-out 30% estratificado'
+
+    return {
+        'classes': classes,
+        'positive_class': positive_class,
+        'weights': w.tolist(),
+        'bias': b,
+        'n_features': int(len(w)),
+        'boundary2d': {'comp_x': 0, 'comp_y': int(last), 'w': w2, 'b': b2},
+        'confusion': {'labels': classes, 'matrix': cm},
+        'accuracy': acc,
+        'kappa': kappa,
+        'n_eval': int(len(y_true)),
+        'holdout_kind': holdout_kind,
+        'cv_folds': clf_cfg.get('cv_folds'),
+        'has_model': card is not None,
+    }
 
 
 _raw_cache: dict[tuple[str, int], object] = {}

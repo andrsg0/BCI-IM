@@ -163,12 +163,48 @@ Puntos clave de implementación:
 
 ### Cerebro 3D EN VIVO (implementado)
 
-`pages/Brain3DPage.tsx` pasó del mundo offline (pesos fijos del CSP) al mundo **online**: ahora la
-cabeza/electrodos se **iluminan con la señal en vivo**. El stream envía la **potencia µ/β por
-canal** (`power`) y la página la centra (resta la media) y la suaviza (EMA) para colorear los
-electrodos; el brillo crece con la desviación, de modo que la **lateralización C3/C4** (la ERD de
-la imaginación motora) “se enciende” durante la demo. Las posiciones vienen de `/api/positions`
-(ligero, sin entrenar modelo). Muestra además la predicción/confianza actual.
+`pages/Brain3DPage.tsx` pasó del mundo offline (pesos fijos del CSP) al mundo **online**: ahora el
+cerebro y los electrodos se **colorean con la señal en vivo**. El stream envía la **potencia µ/β
+por canal** (`power`); las posiciones 10-20 vienen de `/api/positions` (ligero, sin entrenar
+modelo). Muestra además la predicción/confianza actual.
+
+**Componentes** (`components/Brain3D.tsx`, `components/BrainMesh.tsx`):
+
+- **Malla anatómica** (`brain.glb`, ~3 k triángulos) dentro de la escena. Se auto-centra/escala por
+  *bounding box*; `rotation +90°` en `y` endereza el frente (el modelo lo trae en −x). La quiralidad
+  izquierda/derecha del modelo es un flag explícito **`MIRROR_LR`** (`Brain3D.tsx`): voltea SOLO la
+  anatomía del cerebro (`scale x`), no los electrodos (que se colocan por dirección de montaje, ver
+  abajo), así que cambiarlo recoloca los lóbulos bajo unos nodos fijos. Material a `DoubleSide`.
+- **Electrodos como ANILLOS**, no esferas: en la cabeza real el electrodo es un contacto sobre el
+  **cuero cabelludo**, no clavado en la corteza. `BrainMesh` los coloca sobre una **cáscara
+  elipsoidal suave** (semiejes = caja envolvente del cerebro, +10 % de margen): cada electrodo va
+  donde su dirección real del montaje 10-20 corta el elipsoide. Esto (a) evita que los de la línea
+  media —Fz, Cz, POz— caigan dentro de la **fisura interhemisférica** (un *raycast* sobre la malla
+  bache a bache sí los hundía), y (b) los deja en su posición de montaje **independiente** del
+  `MIRROR_LR` del cerebro (la caja envolvente es invariante al espejo). Cada anillo se orienta con su
+  eje hacia afuera (radial). El tooltip del hover se desplaza hacia arriba para no quedar bajo el
+  cursor.
+
+**Heatmap cortical (shader).** El degradado sobre la superficie es el **mismo `power` interpolado
+*entre* electrodos**. Se hace en GPU vía `onBeforeCompile` sobre el `MeshStandardMaterial`:
+interpolación por píxel con kernel **gaussiano sobre la distancia angular** (la generalización 3D
+del topomapa). Es resolución-independiente (degradado suave pese a la malla *low-poly*) y por frame
+solo se actualiza el uniform `uValues[]` (~64 floats), sin recrear geometría — coherente con el
+patrón imperativo del resto de la app (uPlot `setData`).
+
+**Qué significa el color y por qué fluctúa.** 🔴 rojo = más potencia µ/β, 🔵 azul = menos. Es la
+señal **en vivo, ventana a ventana** (no un patrón fijo: el patrón fijo es el CSP, en "El Modelo").
+Por eso parpadea en ambos lados: la lateralización limpia "un lado azul, otro rojo" es una
+**tendencia estadística en el tiempo**, no un corte perfecto en cada frame. Hay **dos modos**
+conmutables (toggle arriba a la derecha; el modo se lee por `ref` para no reconectar el WS):
+
+| Modo | Referencia | Lectura |
+|---|---|---|
+| **ERD** (def.) | potencia de cada canal vs su **propia línea base reciente** (EMA lenta, β=0.02) | un descenso = azul = desincronización; muestra la lateralización **contralateral** (C3↔mano der., C4↔mano izq.) |
+| **Instantánea** | potencia vs la **media espacial** del instante | cuánto destaca cada electrodo ahora mismo; cruda y nerviosa, cambia en ambos lados a la vez |
+
+Ambas son honestas (salen del `power` real); ERD es más didáctica para ver la firma motora, e
+Instantánea muestra la señal sin "calmar". El valor mostrado se suaviza con una EMA rápida.
 
 ### EEGNet como ESPEJO (no como segundo pipeline)
 

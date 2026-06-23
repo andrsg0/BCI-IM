@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
+import { DatasetRolesNote } from '../components/DatasetRolesNote'
 import {
   fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, STATUS_LABEL,
   type DatasetResult, type SubjectRow, type ResultStatus, type AggregateResult,
@@ -72,6 +73,14 @@ function Overview({ index, selected, onSelect }: {
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   {d.label}
                   <StatusBadge status={d.status} />
+                  {d.role === 'live' && (
+                    <span
+                      className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-600"
+                      title="Este dataset es además la demo en vivo. Las cifras de aquí son su benchmark de población (within-subject k-fold y cross-subject LOSO), calculado con particiones independientes — no es el modelo desplegado. La partición concreta del modelo en vivo (0train → 1test) se ve en «Demo en vivo»."
+                    >
+                      {ROLE_TAG.live}
+                    </span>
+                  )}
                 </span>
                 <span className="font-semibold text-slate-800">{s ? pct(s.mean) : '—'}</span>
               </div>
@@ -464,13 +473,15 @@ export default function Results() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Resultados = benchmark de métodos: solo datasets de ENTRENAMIENTO
-    // (los de demo en vivo viven en la sección «Demo en vivo»).
+    // Resultados = benchmark de métodos SOLO sobre datasets de ENTRENAMIENTO/población.
+    // Los datasets de demo en vivo (role='live', p. ej. BCI IV 2a) NO aparecen aquí:
+    // viven exclusivamente en la sección «Demo en vivo» para evitar la confusión de
+    // verlos en dos sitios. (Su modelo desplegado y su partición 0train→1test se ven allí.)
     fetchResultsIndex()
       .then((all) => {
-        const training = all.filter((d) => d.role === 'training')
-        setIndex(training)
-        setSelected((cur) => cur || training[0]?.id || '')
+        const shown = all.filter((d) => d.role === 'training')
+        setIndex(shown)
+        setSelected((cur) => cur || shown[0]?.id || '')
       })
       .catch((e) => setError(String(e)))
     fetchAggregate().then(setAggregate).catch(() => { /* opcional */ })
@@ -501,6 +512,8 @@ export default function Results() {
       world="offline"
     >
       {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">Error: {error}</p>}
+
+      <div className="mb-4"><DatasetRolesNote /></div>
 
       {aggregate && <div className="mb-4"><AggregateMatrix a={aggregate} /></div>}
 

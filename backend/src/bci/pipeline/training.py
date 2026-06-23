@@ -220,6 +220,7 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
             "accuracy_intersession": float(res_is.accuracy),
             "accuracy_kfold": acc_kfold,
             "folds": int(folds),
+            "epochs": int(epochs),
             "viz_trained_on": "all_trials",
         },
     )
