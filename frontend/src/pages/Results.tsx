@@ -6,6 +6,7 @@ import {
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
 import { DatasetRolesNote } from '../components/DatasetRolesNote'
+import { ResultInterpretation } from '../components/ResultInterpretation'
 import {
   fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, STATUS_LABEL,
   type DatasetResult, type SubjectRow, type ResultStatus, type AggregateResult,
@@ -510,6 +511,8 @@ export default function Results() {
       {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">Error: {error}</p>}
 
       <div className="mb-4"><DatasetRolesNote /></div>
+
+      <div className="mb-4"><ResultInterpretation /></div>
 
       {aggregate && <div className="mb-4"><AggregateMatrix a={aggregate} /></div>}
 

@@ -201,11 +201,13 @@ esfera/scalp, con heatmap cortical en GPU.
       tiene `model_BNCI2014_001_s0_eegnet_pooled` (LOSO 0.599); si se quitara ese pooled,
       desaparecería de Resultados y quedaría solo en «Demo en vivo» / Datasets. Badge de rol
       («demo en vivo · usado en pooled») en el `Overview` para no esconder la heterogeneidad.
-- [ ] **Leyenda de interpretación** del resultado (en cabecera o en el botón de info):
-      explicar honestamente por qué varía la precisión (BCI illiteracy, calidad de señal,
-      pocos trials), **sin inventar etiquetas** que el dataset no tiene.
+- [x] **Leyenda de interpretación — HECHO.** Componente `components/ResultInterpretation.tsx`:
+      leyenda colapsable en la cabecera de Resultados (`pages/Results.tsx`, tras `DatasetRolesNote`)
+      que explica honestamente por qué varía la precisión (BCI illiteracy, calidad de señal/montaje,
+      pocos trials, within vs cross, ausencia de clase «reposo») **sin inventar etiquetas** que el
+      dataset no tiene. Enlaza términos al glosario vía `GlossaryText`.
   - **Decidido:** ver sección "Simulador de señal" — esto es la mitad "datos reales" de
-    la decisión "ambas cosas".
+    la decisión "ambas cosas" (la otra mitad, el simulador sintético, sigue pendiente).
 - [x] **EEGNet: ficha de entrenamiento — HECHO.** `components/EEGNetModel.tsx` muestra ahora
       una ficha (nº de trials de entrenamiento, reservados para demo, banda de entrada, épocas,
       nº de filtros temporales F1, fecha) + tabla de precisión honesta EEGNet vs CSP+LDA del
