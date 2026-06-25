@@ -207,7 +207,8 @@ def dataset_results(dataset: str, meta: dict, processed: Path,
     return {
         "id": dataset,
         "label": meta.get("label", dataset),
-        "role": meta.get("role", "training"),
+        "sessions": int(meta.get("sessions", 1)),
+        "live": int(meta.get("sessions", 1)) >= 2,   # ≥2 sesiones ⇒ apto demo en vivo
         "fs": meta.get("fs"),
         "n_subjects_declared": meta.get("subjects"),
         "n_subjects_evaluated": len(subjects),
@@ -258,7 +259,7 @@ def aggregate_methods(datasets: list[tuple[str, dict, Path, list[str] | None]]) 
         per_dataset.append({
             "id": dataset,
             "label": r["label"],
-            "role": r.get("role"),
+            "live": r.get("live"),
             "n": r["n_subjects_evaluated"],
             "cells": cells,
         })

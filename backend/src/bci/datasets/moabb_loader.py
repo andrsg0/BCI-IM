@@ -75,7 +75,14 @@ class EpochedData:
 
 
 def _get_dataset(name: str):
-    """Instancia un dataset de MOABB por su nombre de clase (p. ej. 'BNCI2014_001')."""
+    """Instancia un dataset de MOABB por su nombre de clase (p. ej. 'BNCI2014_001').
+
+    Si el constructor admite ``accept`` (licencia que hay que aceptar para descargar,
+    p. ej. Shin2017A/Ofner2017), se pasa ``accept=True`` automáticamente: en un proyecto
+    académico que ya eligió usar esos datasets, aceptar es el comportamiento esperado.
+    """
+    import inspect
+
     import moabb.datasets as mds
 
     try:
@@ -85,7 +92,10 @@ def _get_dataset(name: str):
             f"Dataset '{name}' no existe en moabb.datasets. "
             f"Ejemplos válidos: BNCI2014_001, PhysionetMI, Cho2017."
         ) from exc
-    return dataset_cls()
+    params = inspect.signature(dataset_cls.__init__).parameters
+    accepts = "accept" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    return dataset_cls(accept=True) if accepts else dataset_cls()
 
 
 def _download_with_retries(

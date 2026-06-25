@@ -124,3 +124,55 @@ class StreamSimulator:
         preds = [r["pred"] for r in results]
         vote = Counter(preds).most_common(1)[0][0] if preds else None
         return vote, results
+
+
+class EEGNetStreamSimulator:
+    """Versión del simulador para EEGNet (clasificación en vivo de los 4 regímenes).
+
+    Misma idea causal que ``StreamSimulator`` (FIR con estado + ventana deslizante),
+    pero clasifica con una red EEGNet en vez de CSP→LDA. Diferencias:
+      - El FIR es la banda AMPLIA con la que se entrenó EEGNet (4–40 Hz por defecto),
+        no la banda µ/β estricta del CSP. Se pasa ``h`` ya diseñado desde fuera.
+      - La ventana debe medir EXACTAMENTE las muestras con que se entrenó la red
+        (la arquitectura depende de ``n_samples``); se pasa ``window`` en muestras.
+      - EEGNet no tiene etapas CSP/LDA, así que ``feat``/``disc`` van a ``None`` (la
+        UI simplemente no dibuja esos paneles para este método).
+    """
+
+    def __init__(self, clf, h, fs, window: int, step: int, ref_idx=None):
+        self.clf = clf
+        self.h = np.asarray(h, dtype=float)
+        self.fs = fs
+        self.window = int(window)
+        self.step = int(step)
+        self.ref_idx = ref_idx
+
+    def stream(self, X_cont: np.ndarray, on_predict=None):
+        n_ch, N = X_cont.shape
+        fir = CausalFIR(self.h, n_ch)
+        filtered = np.zeros((n_ch, 0))
+        results = []
+
+        for start in range(0, N - self.step + 1, self.step):
+            chunk = X_cont[:, start:start + self.step]
+            f = fir.process_chunk(chunk)                         # filtrado causal en vivo
+            filtered = np.concatenate([filtered, f], axis=1)
+            if filtered.shape[1] > self.window:
+                filtered = filtered[:, -self.window:]
+
+            if filtered.shape[1] == self.window:
+                proba = self.clf.predict_proba(filtered[None, :, :])[0]
+                classes = [str(c) for c in self.clf.classes_]
+                pred = classes[int(np.argmax(proba))]
+                probs = {c: float(p) for c, p in zip(classes, proba)}
+                power = np.log(np.var(filtered, axis=1) + 1e-12)
+                rec = {"t": (start + self.step) / self.fs, "pred": pred, "probs": probs,
+                       "power": power.tolist(), "feat": None, "disc": None}
+                if self.ref_idx is not None:
+                    rec["raw"] = (chunk[self.ref_idx] * 1e6).tolist()
+                    rec["filt"] = (f[self.ref_idx] * 1e6).tolist()
+                results.append(rec)
+                if on_predict is not None:
+                    on_predict(rec)
+
+        return results

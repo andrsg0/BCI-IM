@@ -47,10 +47,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt        # torch installed separately, see comment in the file
 
 python scripts/download_data.py --save                       # fetch/cache a dataset
+python scripts/setup_data.py --config ../configs/default.yaml  # bulk-download ALL subjects (new machine)
 python scripts/run_offline.py [--config configs/physionet.yaml]  # full offline pipeline
 python scripts/evaluate_all.py [--config ...] [--subjects 1 2 3] # within-subject eval, all subjects
 python scripts/run_live_sim.py [--realtime]                    # causal streaming simulation
 python scripts/train_model.py / train_eegnet.py                # persist a trained model (.pkl+.json)
+python scripts/train_all_regimes.py --config ../configs/default.yaml  # train/persist the 4 regimes per subject
+python scripts/precompute_payloads.py --config ../configs/default.yaml  # precompute offline viz JSON (portability)
+python scripts/probe_dataset.py --dataset BNCI2014_004         # empirical viability probe of a MOABB dataset
 python scripts/run_server.py [--reload]                        # FastAPI on :8000
 python scripts/demo_dsp.py && python scripts/demo_csp.py       # didactic figures
 ```
@@ -126,14 +130,21 @@ on *all* trials for cleaner learned filters, with separate honest accuracy numbe
 filter bank; its DepthwiseConv2D spatial layer ≈ a learned CSP; SeparableConv2D+pooling ≈
 band-power extraction. Used only to visualize what a network *discovers* on its own
 (`/api/eegnet` exposes its learned filters' frequency response + spatial weights for
-side-by-side comparison with the hand-built FIR/CSP) — **not used for live inference**.
+side-by-side comparison with the hand-built FIR/CSP). **As of 2026-06, EEGNet IS also used
+for live inference** in the Clasificación page (decision reverted): `EEGNetStreamSimulator`
+(`streaming/simulator.py`) streams it window-by-window, just without the CSP/LDA stage panels.
 
 ### Server (`backend/src/bci/server/app.py`)
 
 FastAPI app exposing the Stage 1 pipeline to the frontend. Key things to know before touching it:
 
-- `REGISTRY` maps dataset id → `{label, config, subjects, fs, accuracy}`; this is the single
-  source of truth for which datasets the API serves.
+- `REGISTRY` maps dataset id → `{label, config, subjects, fs, accuracy, sessions}`; this is the
+  single source of truth for which datasets the API serves. There is **no `role` field** (removed
+  jun 2026): a dataset's use is derived from `sessions` via `_is_live(meta)` (`sessions >= 2` ⇒
+  suitable for the live demo's honest inter-session estimate). ALL datasets appear in Results
+  (population benchmark); the `live` ones (≥2 sessions) **also** appear in the live demo. The
+  `/api/datasets`, `/api/results*`, `/api/train_config` responses expose `sessions` + a derived
+  `live` boolean (frontend `lib/datasets.ts` `isLive`/`LIVE_DATASET_LIST` mirror this).
 - Three in-memory caches: `_data_cache` (loaded `EpochedData` per dataset+subject),
   `_model_cache` (trained model+card per dataset+subject+method), `_csp_cache`/`_raw_cache`
   for derived/expensive responses. Cache keys are tuples; invalidation is process-lifetime only
@@ -141,6 +152,15 @@ FastAPI app exposing the Stage 1 pipeline to the frontend. Key things to know be
 - `_ensure_model()` loads a persisted model from disk if present; otherwise trains and saves one
   on the fly as a fallback so the demo never hard-fails — but the intended workflow is to train
   via `scripts/train_model.py`/`train_eegnet.py` ahead of time.
+- **Precomputed viz payloads (portability):** the offline visualization endpoints (`/api/info`,
+  `/api/positions`, `/api/csp`, `/api/csp_signal`, `/api/lda`, `/api/eegnet`) are **disk-first** —
+  they serve a precomputed `viz_{dataset}_s{subject}_{method}_{kind}.json` (under `paths.processed`)
+  if present, else compute on the fly from raw data (current fallback). The build logic lives **once**
+  in `server/payloads.py` (`build_*` functions), used by both the server and
+  `scripts/precompute_payloads.py`; precomputed and on-the-fly responses are byte-identical (locked by
+  `tests/test_payloads.py`). After this, the web renders all offline pages **without raw data** — raw
+  data is only needed for live `/ws/stream` of the demo dataset. Re-run `precompute_payloads.py` after
+  retraining a model.
 - `/api/glossary` parses `docs/glosario.md` directly (categories = `## N. Title`, terms =
   `### Title`) — that file is the single source of truth for glossary content, not duplicated
   in the frontend.
@@ -208,10 +228,11 @@ lucide-react. Full rationale for each library choice is in `docs/frontend-design
   LDA boundary is visually obvious, not implied. The CSP and LDA panels are imperative SVG
   (background "training cloud" drawn once, live point moved via refs/`useImperativeHandle`) for
   the same reason uPlot uses `setData` — avoiding React re-render at streaming frequency.
-- **EEGNet** has no global presence — it's a tab inside `SpatialCSP`/"El Modelo"
-  (`components/EEGNetModel.tsx`) comparing learned vs. hand-built filters side by side. This was
-  a deliberate scope decision (avoiding a second parallel pipeline through the whole app); don't
-  wire EEGNet into live classification or other pages without revisiting that decision.
+- **EEGNet** lives as a tab inside `SpatialCSP`/"El Modelo" (`components/EEGNetModel.tsx`,
+  comparing learned vs. hand-built filters) **and** as one of the 4 selectable regimes in the
+  Clasificación live page (`LiveStream.tsx`: CSP+LDA/EEGNet × within/cross). The earlier "no
+  EEGNet live" scope decision was **reverted (2026-06)**: the live selector passes `method=` to
+  `/ws/stream`; EEGNet streams via `EEGNetStreamSimulator` (no CSP/LDA stage panels for it).
 
 ## Cross-cutting things to know
 

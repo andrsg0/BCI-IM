@@ -17,7 +17,7 @@ interface CSPResp {
   classes: string[]; features: number[][]; labels: string[]; pos2d: Pos2D
 }
 
-interface DatasetInfo { id: string; label: string; subjects: number; fs: number; role?: string }
+interface DatasetInfo { id: string; label: string; subjects: number; fs: number; sessions?: number; live?: boolean }
 
 interface CspSignal {
   fs: number; component: number; n_components: number; favored_class: string
@@ -27,7 +27,7 @@ interface CspSignal {
 
 interface TrainConfig {
   dataset: {
-    id: string; label: string; fs: number; role: string | null
+    id: string; label: string; fs: number; sessions: number | null; live: boolean
     n_subjects: number | null; subject: number; classes: string[]
     n_channels: number | null; channels: string[] | null; n_trials: number | null
   }

@@ -32,23 +32,38 @@ from bci.pipeline.offline import MotorImageryPipeline
 from bci.pipeline.training import (
     load_card, load_model, model_paths, save_model, train_eegnet_subject, train_subject,
 )
+from bci.server import payloads as pl
 from bci.server import results as results_mod
-from bci.streaming.simulator import StreamSimulator
+from bci.streaming.simulator import EEGNetStreamSimulator, StreamSimulator
+
+# Métodos válidos para el selector de 4 regímenes (within/cross × CSP/EEGNet).
+WITHIN_METHODS = ('csp_lda', 'eegnet')
+CROSS_METHODS = ('csp_lda_cross', 'eegnet_cross')
+VALID_METHODS = WITHIN_METHODS + CROSS_METHODS
 
 # Registro de datasets: id -> (etiqueta, config, metadatos conocidos de la Etapa 1).
-# 'role' (ver docs/datasets.md) es la fuente única de la división por uso:
-#   'live'     = demo en vivo (≥2 sesiones, calibrar día1→probar día2). Hoy solo 2a.
-#   'training' = benchmark / pool cross-subject (muchos sujetos). PhysioNet/Dreyer/Cho/Liu.
-# La sección "Resultados" muestra los 'training'; "Demo en vivo" muestra los 'live'.
+# Se describen por PROPIEDADES (no por un rol manual confuso): ``sessions`` = nº de
+# sesiones reales del dataset. De ahí se DERIVA el uso (ver ``_is_live``): con ≥2
+# sesiones (días distintos) hay una estimación honesta inter-sesión, así que el dataset
+# sirve para la demo en vivo (calibrar día1 → probar día2). TODOS los datasets aparecen
+# en "Resultados" (su benchmark de población); los de ≥2 sesiones aparecen ADEMÁS en la
+# "Demo en vivo". Antes esto era un campo 'role' ('live'/'training') que había que poner
+# a mano y excluía el dataset live de Resultados — eliminado en jun 2026.
 REGISTRY = {
-    'BNCI2014_001': {'label': 'BCI IV 2a', 'config': 'configs/default.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.688, 'role': 'live'},
-    'PhysionetMI': {'label': 'PhysioNet MMI', 'config': 'configs/physionet.yaml', 'subjects': 109, 'fs': 160, 'accuracy': 0.608, 'role': 'training'},
-    'Liu2024': {'label': 'Liu2024', 'config': 'configs/liu2024.yaml', 'subjects': 50, 'fs': 500, 'accuracy': 0.536, 'role': 'training'},
+    'BNCI2014_001': {'label': 'BCI IV 2a', 'config': 'configs/default.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.688, 'sessions': 2},
+    'PhysionetMI': {'label': 'PhysioNet MMI', 'config': 'configs/physionet.yaml', 'subjects': 109, 'fs': 160, 'accuracy': 0.608, 'sessions': 1},
+    'Liu2024': {'label': 'Liu2024', 'config': 'configs/liu2024.yaml', 'subjects': 50, 'fs': 500, 'accuracy': 0.536, 'sessions': 1},
     # Datasets nuevos (ver docs/datasets.md). accuracy = provisional (medida en pocos
     # sujetos); reemplazar por la media real con scripts/evaluate_all.py.
-    'Dreyer2023': {'label': 'Dreyer2023', 'config': 'configs/dreyer2023.yaml', 'subjects': 87, 'fs': 512, 'accuracy': 0.696, 'role': 'training'},
-    'Cho2017': {'label': 'Cho2017', 'config': 'configs/cho2017.yaml', 'subjects': 52, 'fs': 512, 'accuracy': 0.755, 'role': 'training'},
+    'Dreyer2023': {'label': 'Dreyer2023', 'config': 'configs/dreyer2023.yaml', 'subjects': 87, 'fs': 512, 'accuracy': 0.696, 'sessions': 1},
+    'Cho2017': {'label': 'Cho2017', 'config': 'configs/cho2017.yaml', 'subjects': 52, 'fs': 512, 'accuracy': 0.755, 'sessions': 1},
 }
+
+
+def _is_live(meta: dict) -> bool:
+    """¿El dataset sirve para la demo en vivo? Sí si tiene ≥2 sesiones (estimación
+    honesta inter-sesión). Derivado de propiedades, sin campo manual."""
+    return int(meta.get('sessions', 1)) >= 2
 
 app = FastAPI(title='BCI · Imaginación Motora', version='0.2.0')
 app.add_middleware(
@@ -100,7 +115,8 @@ def _ensure_model(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[
     pkl_path, json_path = model_paths(out_dir, dataset, subject, method)
     if pkl_path.exists() and json_path.exists():
         model, card = load_model(pkl_path), load_card(json_path)
-    else:  # respaldo: entrenar y persistir con el split honesto
+    elif method in WITHIN_METHODS:
+        # Respaldo barato (un solo sujeto): entrena y persiste con el split honesto.
         from dataclasses import asdict
         cfg = _config_for(dataset)
         if method == 'eegnet':
@@ -109,6 +125,15 @@ def _ensure_model(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[
             model, card_obj, _ = train_subject(cfg, dataset, subject)
         save_model(model, card_obj, out_dir)
         card = asdict(card_obj)
+    else:
+        # Cross-subject: NO se auto-entrena (cargaría TODO el pool de sujetos, caro).
+        # Debe pre-entrenarse con scripts/train_all_regimes.py.
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Modelo '{method}' no entrenado para {dataset} s{subject}. "
+                    f"Córrelo con: python scripts/train_all_regimes.py "
+                    f"--config ../configs/<ds>.yaml --cross-subjects {subject}"),
+        )
 
     _model_cache[key] = (model, card)
     return model, card
@@ -133,18 +158,22 @@ def _get_pipeline(dataset: str, subject: int) -> MotorImageryPipeline:
     return _ensure_model(dataset, subject, 'csp_lda')[0]  # type: ignore[return-value]
 
 
-def _split_idx(dataset: str, subject: int) -> tuple[np.ndarray, np.ndarray]:
+def _split_idx(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[np.ndarray, np.ndarray]:
     """(idx_train, idx_demo) según la ficha del modelo entrenado.
 
     ``idx_demo`` son los trials reservados (held-out) que se transmiten en vivo;
-    ``idx_train`` el resto, lo que el modelo realmente usó para aprender. El split es
-    el mismo para ambos métodos, así que basta consultar la ficha de CSP+LDA.
+    ``idx_train`` el resto. El split depende del régimen del modelo (su ficha):
+      - within (holdout 'session'/'index'): demo = la sesión o fracción reservada.
+      - cross (holdout 'subject'): el modelo NUNCA vio a este sujeto, así que TODOS
+        sus trials son demo válida (idx_train local vacío).
     """
     data = _get_data(dataset, subject)
-    card = _ensure_model(dataset, subject, 'csp_lda')[1]
+    card = _ensure_model(dataset, subject, method)[1]
     n = data.n_trials
     spec = card['holdout']
-    if spec['by'] == 'session':
+    if spec['by'] == 'subject':
+        idx_demo = np.arange(n)                          # todo el sujeto es held-out
+    elif spec['by'] == 'session':
         sess = data.metadata['session'].to_numpy()
         idx_demo = np.where(sess == spec['value'])[0]
     else:
@@ -201,7 +230,9 @@ def glossary():
 
 @app.get('/api/datasets')
 def datasets():
-    return [{'id': k, **{kk: vv for kk, vv in v.items() if kk != 'config'}} for k, v in REGISTRY.items()]
+    return [{'id': k, 'live': _is_live(v),
+             **{kk: vv for kk, vv in v.items() if kk != 'config'}}
+            for k, v in REGISTRY.items()]
 
 
 # --- Resultados (sección Resultados) ---------------------------------------
@@ -236,12 +267,12 @@ def results_index():
 def results_aggregate():
     """Vista general agregada: comparación de métodos sobre toda la población.
 
-    Excluye los datasets de demo en vivo (role='live'): Resultados es solo el
-    benchmark de población (entrenamiento), coherente con la lista que muestra el
-    frontend. El dataset en vivo se ve en «Demo en vivo».
+    Incluye TODOS los datasets (cada uno es autosuficiente con sus 4 regímenes). Los
+    de ≥2 sesiones aparecen además en «Demo en vivo», pero también cuentan aquí como
+    benchmark de población.
     """
     datasets = [(did, meta, _processed_dir(did), _classes_of(did))
-                for did, meta in REGISTRY.items() if meta.get('role') != 'live']
+                for did, meta in REGISTRY.items()]
     return results_mod.aggregate_methods(datasets)
 
 
@@ -257,13 +288,11 @@ def results_detail(dataset: str):
 
 @app.get('/api/info')
 def info(dataset: str, subject: int = 1):
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'any', 'info')
+    if cached is not None:
+        return cached
     data = _get_data(dataset, subject)
-    return {
-        'dataset': dataset, 'subject': subject, 'fs': data.sfreq,
-        'channels': data.ch_names, 'n_trials': data.n_trials,
-        'classes': sorted(set(map(str, data.y))),
-        'class_distribution': data.class_distribution(),
-    }
+    return pl.build_info_payload(dataset, subject, data)
 
 
 @app.get('/api/filter')
@@ -302,34 +331,21 @@ def trial(dataset: str, subject: int = 1, trial: int = 0, channel: str = 'C3'):
     }
 
 
-def _positions(ch_names):
-    """Posiciones de los electrodos (sistema 10-20): 2D para el topomapa y 3D
-    para el cerebro. Usa el montaje estándar de MNE."""
-    import mne
-
-    info = mne.create_info(list(ch_names), 250.0, 'eeg')
-    info.set_montage('standard_1005', match_case=False, on_missing='ignore')
-    ch_pos = info.get_montage().get_positions()['ch_pos']
-    coords = [ch_pos.get(ch) for ch in ch_names]
-    scale = max((abs(float(c[i])) for c in coords if c is not None for i in (0, 1)), default=1.0) or 1.0
-    pos2d, pos3d = {}, {}
-    for ch, c in zip(ch_names, coords):
-        if c is None:
-            pos2d[ch] = None; pos3d[ch] = None
-        else:
-            pos3d[ch] = [float(c[0]), float(c[1]), float(c[2])]
-            pos2d[ch] = [float(c[0] / scale * 0.85), float(c[1] / scale * 0.85)]  # x=derecha, y=anterior
-    return pos2d, pos3d
+# Posiciones de electrodos (montaje 10-20): fuente única en server/payloads.py.
+_positions = pl.electrode_positions
 
 
 @app.get('/api/positions')
 def positions(dataset: str, subject: int = 1):
     """Canales y sus posiciones 2D/3D (montaje 10-20). Ligero: no entrena modelo.
 
-    Lo usa el Cerebro 3D en vivo para situar los electrodos sin cargar el CSP."""
+    Lo usa el Cerebro 3D en vivo para situar los electrodos sin cargar el CSP.
+    Sirve primero el payload precomputado (portabilidad sin datos crudos)."""
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'any', 'positions')
+    if cached is not None:
+        return cached
     data = _get_data(dataset, subject)
-    pos2d, pos3d = _positions(data.ch_names)
-    return {'channels': data.ch_names, 'pos2d': pos2d, 'pos3d': pos3d}
+    return pl.build_positions_payload(data.ch_names)
 
 
 @app.get('/api/model')
@@ -386,7 +402,8 @@ def train_config(dataset: str, subject: int = 1):
             'id': dataset,
             'label': meta.get('label', dataset),
             'fs': fs,
-            'role': meta.get('role'),
+            'sessions': meta.get('sessions'),
+            'live': _is_live(meta),
             'n_subjects': meta.get('subjects'),
             'subject': subject,
             'classes': cfg['dataset'].get('classes') or (card['classes'] if card else []),
@@ -438,57 +455,12 @@ def eegnet_info(dataset: str, subject: int = 1):
       - spatial : pesos por canal de la conv depthwise (≈ filtros espaciales tipo CSP),
         para dibujar topomapas y compararlos con los del CSP.
     """
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'eegnet', 'eegnet')
+    if cached is not None:
+        return cached
     clf, card = _ensure_model(dataset, subject, 'eegnet')
-    mdl = clf.model  # type: ignore[attr-defined]
-    fs = float(card['fs'])
-
-    # Conv temporal: pesos (F1, 1, 1, kern) -> respuesta en frecuencia de cada filtro.
-    Wt = mdl.temporal[0].weight.detach().cpu().numpy()[:, 0, 0, :]   # (F1, kern)
-    freqs = frequency_response(Wt[0], fs, n_freqs=256).freqs_hz.tolist()
-    temporal = []
-    for h in Wt:
-        mag = frequency_response(h, fs, n_freqs=256).magnitude
-        temporal.append((mag / (float(mag.max()) + 1e-12)).tolist())  # normalizado a pico 1
-
-    # Conv depthwise espacial: pesos (F1*D, 1, n_canales, 1) -> un vector por filtro.
-    Ws = mdl.spatial[0].weight.detach().cpu().numpy()[:, 0, :, 0]    # (F1*D, n_canales)
-    pos2d, pos3d = _positions(card['channels'])
-    extra = card.get('extra') or {}
-
-    # Comparación honesta sobre el MISMO sujeto: la ficha del CSP+LDA clásico
-    # (inter-sesión, la misma métrica que el principal de EEGNet). Antes había un
-    # "0.72 / 0.74" hardcodeado en el frontend que no correspondía a ningún valor
-    # medido; aquí se devuelve el número real del modelo entrenado.
     csp_card = _load_card_if_exists(dataset, subject, 'csp_lda')
-    csp_cmp = None
-    if csp_card is not None:
-        csp_cmp = {
-            'accuracy_intersession': float(csp_card['accuracy']),
-            'kappa': float(csp_card['kappa']),
-        }
-
-    return {
-        'channels': card['channels'],
-        'fs': fs,
-        'freqs': freqs,
-        'temporal': temporal,          # (F1, n_freqs) formas de |H|
-        'spatial': Ws.tolist(),        # (F1*D, n_canales) pesos espaciales
-        'classes': card['classes'],
-        'accuracy_intersession': extra.get('accuracy_intersession', card['accuracy']),
-        'accuracy_kfold': extra.get('accuracy_kfold'),
-        'folds': extra.get('folds'),
-        'kern_length': int(Wt.shape[1]),
-        'pos2d': pos2d, 'pos3d': pos3d,
-        # --- ficha de entrenamiento ---
-        'n_train': int(card['n_train']),
-        'n_demo': int(card['n_demo']),
-        'kappa': float(card['kappa']),
-        'trained_on': card['trained_on'],
-        'epochs': extra.get('epochs'),
-        'fir': card['fir'],            # {low_hz, high_hz, num_taps} de la banda amplia
-        'n_temporal': int(Wt.shape[0]),
-        'csp_lda': csp_cmp,            # comparación same-subject (o None)
-    }
+    return pl.build_eegnet_payload(clf, card, csp_card)
 
 
 _csp_cache: dict[tuple[str, int], dict] = {}
@@ -510,30 +482,14 @@ def csp(dataset: str, subject: int = 1):
     if key in _csp_cache:
         return _csp_cache[key]
 
-    data = _get_data(dataset, subject)
-    pipe = _get_pipeline(dataset, subject)
-    idx_train, _ = _split_idx(dataset, subject)
-    feats = pipe._features(data.X[idx_train])     # (n_train, n_componentes)
-    pos2d, pos3d = _positions(data.ch_names)
-    # Proyección de cada trial de entrenamiento sobre la recta discriminante del LDA
-    # (δ_1 − δ_0). Da el HISTOGRAMA de fondo del eje de decisión que la sección En
-    # vivo usa para situar la ventana actual respecto a la frontera (en 0).
-    scores = pipe.lda.decision_function(feats)    # (n_train, n_clases)
-    lda_disc = (scores[:, 1] - scores[:, 0]).tolist() if scores.shape[1] == 2 else \
-        (scores.max(axis=1) - np.sort(scores, axis=1)[:, -2]).tolist()
-    resp = {
-        'channels': data.ch_names,
-        'eigenvalues': pipe.csp.eigenvalues_.tolist(),
-        'patterns': pipe.csp.patterns_.T.tolist(),   # (n_componentes, n_canales)
-        'filters': pipe.csp.filters_.tolist(),       # W (n_componentes, n_canales): Z = W·X
-        'classes': sorted(set(map(str, data.y))),
-        'features': feats.tolist(),
-        'labels': [str(c) for c in np.asarray(data.y)[idx_train]],
-        'lda_disc': lda_disc,                        # proyección discriminante (n_train,)
-        'pos2d': pos2d, 'pos3d': pos3d,
-    }
-    _csp_cache[key] = resp
-    return resp
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'csp_lda', 'csp')
+    if cached is None:
+        data = _get_data(dataset, subject)
+        pipe = _get_pipeline(dataset, subject)
+        idx_train, _ = _split_idx(dataset, subject)
+        cached = pl.build_csp_payload(data, pipe, idx_train)
+    _csp_cache[key] = cached
+    return cached
 
 
 @app.get('/api/csp_signal')
@@ -545,49 +501,16 @@ def csp_signal(dataset: str, subject: int = 1, component: int = 0):
     produce una «señal virtual» mucho más limpia. Se replica el pipeline real
     (FIR → recorte a la ventana activa → CSP) sobre un trial de la clase que el
     componente favorece. Ambas series se normalizan (z-score) para comparar formas,
-    ya que sus escalas (µV vs unidades de proyección) son muy distintas."""
+    ya que sus escalas (µV vs unidades de proyección) son muy distintas.
+
+    El payload precomputado guarda TODOS los componentes; aquí se sirve el pedido."""
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'csp_lda', 'csp_signal')
+    if cached is not None:
+        by_comp = cached['by_component']
+        return by_comp[max(0, min(component, len(by_comp) - 1))]
     data = _get_data(dataset, subject)
     pipe = _get_pipeline(dataset, subject)
-    n_comp = int(pipe.csp.filters_.shape[0])
-    component = max(0, min(component, n_comp - 1))
-
-    # Electrodo con mayor |patrón| para el componente: el más relevante físicamente.
-    patt = np.abs(pipe.csp.patterns_[:, component])
-    ch_idx = int(np.argmax(patt))
-    ch_name = data.ch_names[ch_idx]
-
-    # Trial de la clase que el componente favorece (λ alto → clase 0; λ bajo → clase 1).
-    lam = float(pipe.csp.eigenvalues_[component])
-    classes = sorted(set(map(str, data.y)))
-    favored = classes[0] if lam >= 0.5 else classes[1]
-    y = np.asarray(list(map(str, data.y)))
-    cand = np.where(y == favored)[0]
-    trial = int(cand[0]) if len(cand) else 0
-
-    X = data.X[trial]                                     # (n_canales, n_muestras)
-    fs = float(data.sfreq)
-    Xf = apply_filter(X[None], pipe.filt.h, mode='same')[0]
-    crop = pipe._crop                                     # (i0, i1) en muestras
-    if crop is not None:
-        Xf = Xf[:, crop[0]:crop[1]]
-        Xraw = X[:, crop[0]:crop[1]]
-    else:
-        Xraw = X
-    z = pipe.csp.transform(Xf[None])[0, component, :]     # componente en el tiempo
-    raw = Xraw[ch_idx]
-
-    def zscore(a):
-        a = np.asarray(a, dtype=float)
-        s = float(a.std()) or 1.0
-        return ((a - a.mean()) / s).tolist()
-
-    return {
-        'fs': fs, 'component': component, 'n_components': n_comp,
-        'favored_class': favored, 'eigenvalue': lam,
-        'channel': ch_name, 'trial': trial,
-        't': (np.arange(raw.shape[0]) / fs).tolist(),
-        'raw': zscore(raw), 'csp': zscore(z),
-    }
+    return pl.build_csp_signal_payload(data, pipe, component)
 
 
 @app.get('/api/lda')
@@ -603,70 +526,14 @@ def lda_info(dataset: str, subject: int = 1):
       - confusion    : matriz de confusión sobre la partición HELD-OUT (la que el modelo
         nunca vio), junto a accuracy y κ honestos (coinciden con la ficha del modelo).
     """
-    from sklearn.metrics import cohen_kappa_score, confusion_matrix
-
-    from bci.models.lda import LDA
-
+    cached = pl.load_payload(_processed_dir(dataset), dataset, subject, 'csp_lda', 'lda')
+    if cached is not None:
+        return cached
     data = _get_data(dataset, subject)
     pipe = _get_pipeline(dataset, subject)
     idx_train, idx_demo = _split_idx(dataset, subject)
-    classes = sorted(set(map(str, data.y)))
-    y = np.asarray(list(map(str, data.y)))
-
-    lda = pipe.lda
-    # Discriminante binario explícito y = w·F + b (δ₀ − δ₁): y>0 ⇒ clase 0.
-    if lda.coef_.shape[0] == 2:
-        w = (lda.coef_[0] - lda.coef_[1])
-        b = float(lda.intercept_[0] - lda.intercept_[1])
-        positive_class = classes[0]
-    else:  # multiclase (no esperado en binario): degradar a one-vs-rest de la 1ª clase
-        w = lda.coef_[0]
-        b = float(lda.intercept_[0])
-        positive_class = classes[0]
-
-    # Frontera en el plano 2D que se dibuja (comp 0 vs comp extremo).
-    feats_tr = pipe._features(data.X[idx_train])      # (n_train, n_componentes)
-    last = feats_tr.shape[1] - 1
-    lda2 = LDA().fit(feats_tr[:, [0, last]], y[idx_train])
-    if lda2.coef_.shape[0] == 2:
-        w2 = (lda2.coef_[0] - lda2.coef_[1]).tolist()
-        b2 = float(lda2.intercept_[0] - lda2.intercept_[1])
-    else:
-        w2 = lda2.coef_[0].tolist(); b2 = float(lda2.intercept_[0])
-
-    # Rendimiento honesto sobre el held-out (lo que el modelo nunca vio).
-    y_true = y[idx_demo]
-    y_pred = np.asarray(list(map(str, pipe.predict(data.X[idx_demo]))))
-    cm = confusion_matrix(y_true, y_pred, labels=classes).tolist()
-    acc = float(np.mean(y_pred == y_true)) if len(y_true) else 0.0
-    kappa = float(cohen_kappa_score(y_true, y_pred, labels=classes)) if len(y_true) else 0.0
-
-    cfg = _config_for(dataset)
-    clf_cfg = cfg.get('classifier', {})
     card = _load_card_if_exists(dataset, subject, 'csp_lda')
-    holdout = card.get('holdout') if card else None
-    if holdout and holdout.get('by') == 'session':
-        holdout_kind = 'inter-sesión'
-    elif holdout:
-        holdout_kind = 'hold-out 30% estratificado'
-    else:
-        holdout_kind = 'hold-out 30% estratificado'
-
-    return {
-        'classes': classes,
-        'positive_class': positive_class,
-        'weights': w.tolist(),
-        'bias': b,
-        'n_features': int(len(w)),
-        'boundary2d': {'comp_x': 0, 'comp_y': int(last), 'w': w2, 'b': b2},
-        'confusion': {'labels': classes, 'matrix': cm},
-        'accuracy': acc,
-        'kappa': kappa,
-        'n_eval': int(len(y_true)),
-        'holdout_kind': holdout_kind,
-        'cv_folds': clf_cfg.get('cv_folds'),
-        'has_model': card is not None,
-    }
+    return pl.build_lda_payload(data, pipe, idx_train, idx_demo, _config_for(dataset), card)
 
 
 _raw_cache: dict[tuple[str, int], object] = {}
@@ -722,30 +589,53 @@ def continuous_all(dataset: str, subject: int = 1, seconds: float = 30):
 # --- WebSocket: simulación en vivo -----------------------------------------
 @app.websocket('/ws/stream')
 async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject: int = 1,
-                    channel: str = 'C3'):
+                    channel: str = 'C3', method: str = 'csp_lda'):
     await websocket.accept()
     loop = asyncio.get_event_loop()
+    if method not in VALID_METHODS:
+        await websocket.send_json({'error': f"método '{method}' inválido; usa {VALID_METHODS}"})
+        await websocket.close()
+        return
     try:
         # Cargar datos y el modelo YA ENTRENADO fuera del event loop (operación pesada).
         # Clave de la separación entrenar/transmitir: solo transmitimos los trials
         # HELD-OUT, que el modelo nunca vio al entrenar (sin fuga de datos).
         data = await loop.run_in_executor(None, _get_data, dataset, subject)
-        pipe = await loop.run_in_executor(None, _get_pipeline, dataset, subject)
-        _, idx_demo = await loop.run_in_executor(None, _split_idx, dataset, subject)
+        try:
+            model, _card = await loop.run_in_executor(None, _ensure_model, dataset, subject, method)
+            _, idx_demo = await loop.run_in_executor(None, _split_idx, dataset, subject, method)
+        except HTTPException as exc:   # modelo cross no entrenado todavía
+            await websocket.send_json({'error': exc.detail})
+            await websocket.close()
+            return
         cfg = _config_for(dataset)
         s = cfg['streaming']
         ws_len = s['window_s']
+        step = s['step_s']
+        fs = data.sfreq
         ref_ch = channel if channel in data.ch_names else ('C3' if 'C3' in data.ch_names else data.ch_names[0])
         ref_idx = data.ch_names.index(ref_ch)
-        sim = StreamSimulator(pipe, window_s=ws_len, step_s=s['step_s'], ref_idx=ref_idx)
-        step = s['step_s']
+        win = cfg.get('classification_window')
+
+        # Selección del simulador según el método (CSP→LDA vs EEGNet).
+        if method in ('csp_lda', 'csp_lda_cross'):
+            sim = StreamSimulator(model, window_s=ws_len, step_s=step, ref_idx=ref_idx)
+            win_s = ws_len
+        else:  # eegnet / eegnet_cross: banda amplia + ventana = longitud de entrenamiento
+            eeg_cfg = cfg.get('eegnet') or {}
+            low = float(eeg_cfg.get('band_low', 4.0))
+            high = min(float(eeg_cfg.get('band_high', 40.0)), fs / 2 - 1)
+            band = design_bandpass_fir(low, high, fs, 101)
+            w0 = int(win['tmin_rel'] * fs) if win else 0
+            w1 = int(win['tmax_rel'] * fs) if win else data.X.shape[2]
+            sim = EEGNetStreamSimulator(model, band.h, fs, w1 - w0, int(step * fs), ref_idx=ref_idx)
+            win_s = (w1 - w0) / fs
 
         # Ventana de imaginación ACTIVA en el eje 't' (fin de ventana): el centro de la
-        # ventana (t - window_s/2) debe caer en [tmin_rel, tmax_rel]. El frontend usa
+        # ventana (t - win_s/2) debe caer en [tmin_rel, tmax_rel]. El frontend usa
         # estos límites para que la decisión por trial solo cuente las ventanas útiles.
-        win = cfg.get('classification_window')
-        alo = (win['tmin_rel'] + ws_len / 2) if win else 0.0
-        ahi = (win['tmax_rel'] + ws_len / 2) if win else 1e9
+        alo = (win['tmin_rel'] + win_s / 2) if win else 0.0
+        ahi = (win['tmax_rel'] + win_s / 2) if win else 1e9
 
         # Reproduce SOLO los trials reservados (held-out) en bucle.
         j = 0

@@ -82,6 +82,27 @@ def split_train_demo(data: EpochedData):
     return idx_train, idx_demo, {"by": "index", "indices": idx_demo.tolist()}, None
 
 
+def split_train_demo_subject(data: EpochedData, demo_subject: int):
+    """Split CROSS-SUBJECT (opción A): entrena con TODOS los sujetos menos uno.
+
+    A diferencia de ``split_train_demo`` (que reserva una SESIÓN del mismo sujeto), aquí
+    se reserva un SUJETO entero: el modelo se entrena con los demás y la demo se transmite
+    sobre ``demo_subject``, a quien el modelo NUNCA vio. Es la estimación honesta de
+    "ponérselo a una persona nueva sin calibrar". Un solo entrenamiento (un fold), no el
+    LOSO completo de N folds (ese es opcional, solo para la accuracy media de Resultados).
+
+    Devuelve (idx_train, idx_demo, holdout_spec).
+    """
+    subj = data.metadata["subject"].to_numpy()
+    idx_demo = np.where(subj == demo_subject)[0]
+    idx_train = np.where(subj != demo_subject)[0]
+    if len(idx_demo) == 0:
+        raise ValueError(f"El sujeto demo {demo_subject} no está en los datos cargados.")
+    if len(idx_train) == 0:
+        raise ValueError("No quedan sujetos para entrenar (se necesita >= 2 sujetos).")
+    return idx_train, idx_demo, {"by": "subject", "value": int(demo_subject)}
+
+
 # --- Persistencia ----------------------------------------------------------
 def model_paths(out_dir: Path, dataset: str, subject: int, method: str = "csp_lda") -> tuple[Path, Path]:
     """Rutas del .pkl (modelo) y .json (ficha) para un (dataset, sujeto, método)."""
@@ -222,6 +243,109 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
             "folds": int(folds),
             "epochs": int(epochs),
             "viz_trained_on": "all_trials",
+        },
+    )
+    return clf, card, data
+
+
+# --- Régimen cross-subject (opción A: persona nueva, 1 fold) ---------------
+def train_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subject: int):
+    """CSP+LDA CROSS-SUBJECT: entrena con ``subjects`` menos ``demo_subject``.
+
+    Mismo pipeline que ``train_subject`` (FIR→CSP→log-var→LDA) pero el split es por
+    SUJETO: el modelo no ve a ``demo_subject`` y se evalúa sobre él. Como CSP es
+    sujeto-específico (sus filtros se ajustan a una anatomía), aquí suele rendir bajo
+    — y ESE contraste con el within-subject es justamente lo didáctico.
+
+    Devuelve (pipeline, ficha, datos) — misma firma que ``train_subject``.
+    """
+    cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
+    data = load_from_config(cfg)
+    fs = data.sfreq
+    y = np.asarray(data.y)
+
+    idx_train, idx_demo, holdout = split_train_demo_subject(data, demo_subject)
+    pipe = MotorImageryPipeline(cfg, fs=fs).fit(data.X[idx_train], y[idx_train])
+
+    res = _metrics(y[idx_demo], pipe.predict(data.X[idx_demo]))
+    fir = cfg["fir_filter"]
+    train_subjects = sorted(int(s) for s in np.unique(data.metadata["subject"]) if s != demo_subject)
+    card = ModelCard(
+        dataset=dataset,
+        subject=int(demo_subject),           # el sujeto HELD-OUT (cuyos datos se transmiten)
+        method="csp_lda_cross",
+        fs=float(fs),
+        classes=sorted(set(map(str, y))),
+        channels=list(data.ch_names),
+        holdout=holdout,
+        train_session=None,
+        n_train=int(len(idx_train)),
+        n_demo=int(len(idx_demo)),
+        accuracy=float(res.accuracy),        # honesta cross-subject (persona nueva)
+        kappa=float(res.kappa),
+        trained_on=date.today().isoformat(),
+        n_components=int(cfg["csp"]["n_components"]),
+        fir={"low_hz": fir["low_hz"], "high_hz": fir["high_hz"], "num_taps": fir["num_taps"]},
+        extra={"train_subjects": train_subjects, "n_train_subjects": len(train_subjects)},
+    )
+    return pipe, card, data
+
+
+def train_eegnet_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subject: int,
+                              epochs: int = 250, weight_decay: float = 1e-3,
+                              device: str | None = None, augment: bool = False,
+                              augment_copies: int = 2):
+    """EEGNet CROSS-SUBJECT: entrena con ``subjects`` menos ``demo_subject``.
+
+    Es el régimen donde el deep learning brilla frente a CSP: una red entrenada con
+    muchas personas puede generalizar (algo) a una nueva sin calibrar. Un solo
+    entrenamiento (no LOSO completo): el más caro de los cuatro regímenes.
+
+    Devuelve (clf, ficha, datos) — misma firma que ``train_eegnet_subject``.
+    """
+    from bci.datasets.augment import augment_trials
+    from bci.models.eegnet import EEGNetClassifier, pick_device
+
+    cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
+    data = load_from_config(cfg)
+    y = np.asarray(data.y)
+
+    Xc, fs, kern, high = _eegnet_features(cfg, data)
+    idx_train, idx_demo, holdout = split_train_demo_subject(data, demo_subject)
+    n_classes = len(np.unique(y))
+    dev = pick_device(device)
+
+    Xtr, ytr = Xc[idx_train], y[idx_train]
+    if augment:
+        Xtr, ytr = augment_trials(Xtr, ytr, copies=augment_copies)
+    clf = EEGNetClassifier(n_classes=n_classes, epochs=epochs, kern_length=kern,
+                           weight_decay=weight_decay, device=dev).fit(Xtr, ytr)
+
+    res = _metrics(y[idx_demo], clf.predict(Xc[idx_demo]))
+    n_temporal = int(clf.model.temporal[0].weight.shape[0])
+    train_subjects = sorted(int(s) for s in np.unique(data.metadata["subject"]) if s != demo_subject)
+    card = ModelCard(
+        dataset=dataset,
+        subject=int(demo_subject),
+        method="eegnet_cross",
+        fs=float(fs),
+        classes=sorted(set(map(str, y))),
+        channels=list(data.ch_names),
+        holdout=holdout,
+        train_session=None,
+        n_train=int(len(idx_train)),
+        n_demo=int(len(idx_demo)),
+        accuracy=float(res.accuracy),        # honesta cross-subject (persona nueva)
+        kappa=float(res.kappa),
+        trained_on=date.today().isoformat(),
+        n_components=n_temporal,
+        fir={"low_hz": 4.0, "high_hz": high, "num_taps": 101},
+        extra={
+            "train_subjects": train_subjects,
+            "n_train_subjects": len(train_subjects),
+            "device": dev,
+            "epochs": int(epochs),
+            "augment": bool(augment),
         },
     )
     return clf, card, data

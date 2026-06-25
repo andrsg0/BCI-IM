@@ -73,12 +73,12 @@ function Overview({ index, selected, onSelect }: {
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   {d.label}
                   <StatusBadge status={d.status} />
-                  {d.role === 'live' && (
+                  {d.live && (
                     <span
                       className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-600"
-                      title="Este dataset es además la demo en vivo. Las cifras de aquí son su benchmark de población (within-subject k-fold y cross-subject LOSO), calculado con particiones independientes — no es el modelo desplegado. La partición concreta del modelo en vivo (0train → 1test) se ve en «Demo en vivo»."
+                      title="Este dataset tiene ≥2 sesiones, así que además sirve para la demo en vivo. Las cifras de aquí son su benchmark de población (within-subject k-fold y cross-subject LOSO), calculado con particiones independientes — no es el modelo desplegado. La partición concreta del modelo en vivo (0train → 1test) se ve en «Demo en vivo»."
                     >
-                      {ROLE_TAG.live}
+                      {LIVE_TAG}
                     </span>
                   )}
                 </span>
@@ -182,10 +182,7 @@ function SignificanceNote({ label, sig }: { label: string; sig?: { p: number; n:
 // ---------------------------------------------------------------------------
 // Vista general agregada: matriz 2×2 sobre TODA la población (no por dataset).
 // ---------------------------------------------------------------------------
-const ROLE_TAG: Record<string, string> = {
-  live: 'demo en vivo',
-  training: 'entrenamiento',
-}
+const LIVE_TAG = 'demo en vivo'
 
 function AggregateMatrix({ a }: { a: AggregateResult }) {
   const m = a.matrix
@@ -255,7 +252,7 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
                 <tr key={d.id} className="border-b border-slate-100">
                   <td className="px-2 py-1.5 text-slate-700">
                     {d.label}
-                    {d.role && <span className="ml-1 text-[10px] text-slate-400">· {ROLE_TAG[d.role] ?? d.role}</span>}
+                    {d.live && <span className="ml-1 text-[10px] text-slate-400">· {LIVE_TAG}</span>}
                   </td>
                   <td className="px-2 py-1.5 tabular-nums text-slate-500">{d.n}</td>
                   {cols.map((c) => (
@@ -473,15 +470,14 @@ export default function Results() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Resultados = benchmark de métodos SOLO sobre datasets de ENTRENAMIENTO/población.
-    // Los datasets de demo en vivo (role='live', p. ej. BCI IV 2a) NO aparecen aquí:
-    // viven exclusivamente en la sección «Demo en vivo» para evitar la confusión de
-    // verlos en dos sitios. (Su modelo desplegado y su partición 0train→1test se ven allí.)
+    // Resultados = benchmark de métodos sobre TODOS los datasets (cada uno autosuficiente
+    // con sus 4 regímenes). Los de ≥2 sesiones (etiquetados «demo en vivo») aparecen aquí
+    // como benchmark de población Y además en la sección «Demo en vivo» (su modelo
+    // desplegado y su partición 0train→1test se ven allí).
     fetchResultsIndex()
       .then((all) => {
-        const shown = all.filter((d) => d.role === 'training')
-        setIndex(shown)
-        setSelected((cur) => cur || shown[0]?.id || '')
+        setIndex(all)
+        setSelected((cur) => cur || all[0]?.id || '')
       })
       .catch((e) => setError(String(e)))
     fetchAggregate().then(setAggregate).catch(() => { /* opcional */ })

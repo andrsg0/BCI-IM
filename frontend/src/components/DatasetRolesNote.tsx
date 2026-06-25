@@ -2,17 +2,17 @@ import { useEffect, useState } from 'react'
 import { Radio, Database } from 'lucide-react'
 import { fetchResultsIndex, type DatasetResult } from '../lib/results'
 
-/** Explica los DOS usos de los datasets (demo en vivo vs benchmark de población) y
- *  muestra, con datos reales del backend, qué tan completo está cada uno. Resuelve la
- *  duda recurrente de «qué dataset se usa para qué» y hace visibles los huecos
- *  (p. ej. datasets aún sin la comparación EEGNet). */
+/** Explica cómo se usan los datasets y muestra, con datos reales del backend, qué tan
+ *  completo está cada uno. Cada dataset es autosuficiente: TODOS se benchmarkean (4
+ *  regímenes); los de ≥2 sesiones sirven ADEMÁS para la demo en vivo (inter-sesión).
+ *  Hace visibles los huecos (p. ej. datasets aún sin la comparación EEGNet). */
 export function DatasetRolesNote() {
   const [items, setItems] = useState<DatasetResult[] | null>(null)
   useEffect(() => { fetchResultsIndex().then(setItems).catch(() => setItems([])) }, [])
   if (!items || items.length === 0) return null
 
-  const live = items.filter((d) => d.role === 'live')
-  const train = items.filter((d) => d.role === 'training')
+  const live = items.filter((d) => d.live)
+  const train = items   // todos se benchmarkean (cada dataset es autosuficiente)
 
   // Estado de completitud para los datasets de benchmark.
   const completeness = (d: DatasetResult) => {
@@ -30,30 +30,29 @@ export function DatasetRolesNote() {
         </div>
         <p className="mb-2 text-[11px] leading-snug text-emerald-700">
           Requisito: <strong>≥ 2 sesiones</strong> (días distintos) para una estimación honesta inter-sesión.
-          Por eso solo un dataset cumple este rol.
         </p>
         <ul className="space-y-1 text-xs text-slate-600">
           {live.map((d) => (
             <li key={d.id} className="flex items-center justify-between gap-2">
               <span className="font-medium">{d.label}</span>
-              <span className="text-slate-400">{d.n_subjects_declared ?? '?'} sujetos · 2 sesiones</span>
+              <span className="text-slate-400">{d.n_subjects_declared ?? '?'} sujetos · {d.sessions} sesiones</span>
             </li>
           ))}
           {live.length === 0 && <li className="text-slate-400">—</li>}
         </ul>
         <p className="mt-2 text-[10px] text-emerald-600">
-          Vive solo aquí: no aparece en Resultados para no verlo en dos sitios.
+          Aparecen también en el benchmark de al lado (cada dataset es autosuficiente).
         </p>
       </div>
 
-      {/* ENTRENAMIENTO / BENCHMARK ------------------------------------------- */}
+      {/* BENCHMARK DE POBLACIÓN (todos) ------------------------------------- */}
       <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
         <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-amber-800">
-          <Database size={15} /> Entrenamiento / benchmark (población)
+          <Database size={15} /> Benchmark de población (todos)
         </div>
         <p className="mb-2 text-[11px] leading-snug text-amber-700">
-          Requisito: <strong>muchos sujetos diversos</strong>. Se usan para comparar métodos
-          (within-subject vs cross-subject), no para la demo en vivo.
+          <strong>Todos</strong> los datasets se evalúan aquí: comparan métodos
+          (within-subject vs cross-subject, CSP+LDA vs EEGNet) sobre su población.
         </p>
         <ul className="space-y-1 text-xs text-slate-600">
           {train.map((d) => {

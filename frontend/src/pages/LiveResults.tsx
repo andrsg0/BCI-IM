@@ -67,12 +67,12 @@ export default function LiveResults() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Solo datasets de demo en vivo (role='live'), y que existan en el selector (DATASETS).
+  // Solo datasets aptos para la demo en vivo (≥2 sesiones ⇒ d.live) y presentes en el selector (DATASETS).
   useEffect(() => {
     fetchResultsIndex()
       .then((all) => {
         const live = all
-          .filter((d) => d.role === 'live' && d.id in DATASETS)
+          .filter((d) => d.live && d.id in DATASETS)
           .map((d) => ({ id: d.id, label: d.label, subjects: d.n_subjects_declared ?? 9 }))
         setLiveList(live)
         // Si lo seleccionado no es de demo en vivo, saltar al primero que sí lo sea.

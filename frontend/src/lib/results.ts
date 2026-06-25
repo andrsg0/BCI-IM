@@ -45,12 +45,12 @@ export interface Pooled {
 
 export type ResultStatus = 'measured' | 'partial' | 'pending'
 
-export type DatasetRole = 'live' | 'training'
-
 export interface DatasetResult {
   id: string
   label: string
-  role: DatasetRole
+  /** nº de sesiones reales; ``live`` se deriva (≥2 ⇒ apto demo en vivo). */
+  sessions: number
+  live: boolean
   fs: number | null
   n_subjects_declared?: number | null
   n_subjects_evaluated: number
@@ -79,7 +79,7 @@ export interface AggregateResult {
   per_dataset: {
     id: string
     label: string
-    role: DatasetRole | null
+    live: boolean | null
     n: number
     cells: Record<string, number>
   }[]

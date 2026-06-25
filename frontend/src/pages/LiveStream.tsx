@@ -11,8 +11,18 @@ import { openStream, getJSON } from '../api/client'
 
 interface Msg {
   trial: number; 'true': string; t: number; pred: string; probs: Record<string, number>
-  feat?: number[]; disc?: number; filt?: number[]; alo?: number; ahi?: number
+  feat?: number[] | null; disc?: number | null; filt?: number[]; alo?: number; ahi?: number
+  error?: string
 }
+
+// Los 4 regímenes del selector (within/cross × CSP/EEGNet). El stream y la ficha
+// se piden con el `method` elegido; los cross deben estar pre-entrenados.
+const METHODS = [
+  { id: 'csp_lda', label: 'CSP+LDA', regime: 'within', stages: true },
+  { id: 'csp_lda_cross', label: 'CSP+LDA', regime: 'cross', stages: true },
+  { id: 'eegnet', label: 'EEGNet', regime: 'within', stages: false },
+  { id: 'eegnet_cross', label: 'EEGNet', regime: 'cross', stages: false },
+] as const
 
 interface CSPResp {
   classes: string[]; eigenvalues: number[]; features: number[][]
@@ -20,10 +30,11 @@ interface CSPResp {
 }
 
 interface ModelCard {
-  dataset: string; subject: number; classes: string[]
-  holdout: { by: 'session' | 'index'; value?: string }
+  dataset: string; subject: number; classes: string[]; method: string
+  holdout: { by: 'session' | 'index' | 'subject'; value?: string | number }
   train_session: string | null
   n_train: number; n_demo: number; accuracy: number; trained_on: string
+  extra?: { n_train_subjects?: number } | null
 }
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
@@ -54,16 +65,22 @@ export default function LiveStream() {
   const [threshold, setThreshold] = useState(0.65)
   const [card, setCard] = useState<ModelCard | null>(null)
   const [csp, setCsp] = useState<CSPResp | null>(null)
+  const [method, setMethod] = useState<string>('csp_lda')
+  const [streamError, setStreamError] = useState<string | null>(null)
+  const methodInfo = METHODS.find((m) => m.id === method)!
   const thresholdRef = useRef(0.65)
   useEffect(() => { thresholdRef.current = threshold }, [threshold])
   // acumulador de probabilidades del trial en curso (voto suave)
   const buf = useRef<{ trial: number | null; t: string; sum: Record<string, number>; n: number }>({ trial: null, t: '', sum: {}, n: 0 })
 
-  // ficha del modelo YA ENTRENADO (mundo offline): con qué se entrenó y qué se reserva
+  // ficha del modelo YA ENTRENADO (mundo offline): con qué se entrenó y qué se reserva.
+  // Depende del régimen elegido (cada método tiene su ficha).
   useEffect(() => {
-    setCard(null)
-    getJSON<ModelCard>(`/model?dataset=${dataset}&subject=${subject}`).then(setCard).catch(() => setCard(null))
-  }, [dataset, subject])
+    setCard(null); setStreamError(null)
+    getJSON<ModelCard>(`/model?dataset=${dataset}&subject=${subject}&method=${method}`)
+      .then(setCard)
+      .catch(() => setCard(null))
+  }, [dataset, subject, method])
 
   // nube de ENTRENAMIENTO (fija) sobre la que se dibuja el punto en vivo del CSP y el LDA
   const clsRef = useRef<string[]>([])
@@ -105,15 +122,17 @@ export default function LiveStream() {
     chartU.current?.setData(EMPTY)
     filtU.current?.setData(EMPTY2)
     cspRef.current?.reset(); ldaRef.current?.reset()
-  }, [clearToken, dataset, subject])
+  }, [clearToken, dataset, subject, method])
 
   // conexión al WebSocket: solo mientras "playing"
   useEffect(() => {
     if (!playing) return
     const { addLog, setLatency } = useStore.getState()
-    addLog(`Conectado al stream en vivo (${dataset} · sujeto ${subject}).`)
-    const ws = openStream(`/stream?dataset=${dataset}&subject=${subject}`, (d) => {
+    addLog(`Conectado al stream en vivo (${dataset} · sujeto ${subject} · ${method}).`)
+    const ws = openStream(`/stream?dataset=${dataset}&subject=${subject}&method=${method}`, (d) => {
       const m = d as Msg
+      // El servidor manda {error} si el modelo (p. ej. un cross) no está entrenado.
+      if (m.error) { setStreamError(m.error); addLog(`Stream: ${m.error}`); return }
       setClasses((c) => (c.length ? c : Object.keys(m.probs)))
       const cls = Object.keys(m.probs)
       const h = hist.current
@@ -166,7 +185,7 @@ export default function LiveStream() {
       if (k % 8 === 0) setLatency(Math.round(16 + Math.random() * 24))
     })
     return () => { ws.close(); useStore.getState().addLog('Stream cerrado.') }
-  }, [playing, dataset, subject])
+  }, [playing, dataset, subject, method])
 
   const colorOf = (cls: string) => CLASS_COLORS[Math.max(0, classes.indexOf(cls)) % CLASS_COLORS.length]
   const chartOptions = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
@@ -290,35 +309,79 @@ export default function LiveStream() {
       help={HELP}
       world="online"
     >
+      {/* Selector de los 4 regímenes (within/cross × CSP/EEGNet). Cambia el modelo
+          que se transmite en vivo; los cross deben estar pre-entrenados. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-xs font-semibold text-slate-500">Régimen:</span>
+        {METHODS.map((m) => (
+          <button
+            key={m.id}
+            onClick={() => setMethod(m.id)}
+            className={`rounded-full px-3 py-1 text-xs transition ${
+              method === m.id ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {m.label} · {m.regime}
+          </button>
+        ))}
+      </div>
+
+      {streamError && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700">
+          <strong>No se pudo transmitir este régimen.</strong> {streamError}
+        </div>
+      )}
+
       {card && (
         <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5 text-xs text-amber-900">
           <span className="flex items-center gap-1.5 font-semibold">
             <Database size={14} /> Modelo ya entrenado (antes del streaming)
           </span>
-          <span>
-            Entrenado con{' '}
-            <strong>{card.train_session ? `sesión '${card.train_session}'` : 'fracción estratificada'}</strong>{' '}
-            ({card.n_train} trials)
-          </span>
-          <span>
-            Esta demo transmite el <strong>held-out</strong>
-            {card.holdout.by === 'session' && card.holdout.value ? ` (sesión '${card.holdout.value}')` : ''}:{' '}
-            <strong>{card.n_demo} trials</strong> que el modelo nunca vio
-          </span>
+          {card.holdout.by === 'subject' ? (
+            <>
+              <span>
+                Entrenado con <strong>{card.extra?.n_train_subjects ?? '?'} sujetos</strong> distintos
+                ({card.n_train} trials)
+              </span>
+              <span>
+                Esta demo transmite a un <strong>sujeto nuevo</strong> (el {card.subject}):{' '}
+                <strong>{card.n_demo} trials</strong> de alguien que el modelo nunca vio
+              </span>
+            </>
+          ) : (
+            <>
+              <span>
+                Entrenado con{' '}
+                <strong>{card.train_session ? `sesión '${card.train_session}'` : 'fracción estratificada'}</strong>{' '}
+                ({card.n_train} trials)
+              </span>
+              <span>
+                Esta demo transmite el <strong>held-out</strong>
+                {card.holdout.by === 'session' && card.holdout.value ? ` (sesión '${card.holdout.value}')` : ''}:{' '}
+                <strong>{card.n_demo} trials</strong> que el modelo nunca vio
+              </span>
+            </>
+          )}
           <span>
             Accuracy de validación: <strong>{(card.accuracy * 100).toFixed(1)}%</strong>
           </span>
         </div>
       )}
 
-      {/* tira-resumen del recorrido: deja claro que la señal filtrada NO se clasifica
-          sin más, sino que atraviesa dos etapas lineales distintas (CSP y LDA). */}
+      {/* tira-resumen del recorrido. Para CSP+LDA son dos etapas lineales explícitas
+          (CSP y LDA); para EEGNet, la red aprende esas etapas internamente. */}
       <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="flex items-center gap-1.5 rounded-md bg-cyan-50 px-2.5 py-1 text-cyan-700"><Waves size={13} /> señal filtrada</span>
         <span className="text-slate-300">→</span>
-        <span className="flex items-center gap-1.5 rounded-md bg-violet-50 px-2.5 py-1 text-violet-700"><Grid3x3 size={13} /> CSP (Z = W·X)</span>
-        <span className="text-slate-300">→</span>
-        <span className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-emerald-700"><Scale size={13} /> LDA (frontera)</span>
+        {methodInfo.stages ? (
+          <>
+            <span className="flex items-center gap-1.5 rounded-md bg-violet-50 px-2.5 py-1 text-violet-700"><Grid3x3 size={13} /> CSP (Z = W·X)</span>
+            <span className="text-slate-300">→</span>
+            <span className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-emerald-700"><Scale size={13} /> LDA (frontera)</span>
+          </>
+        ) : (
+          <span className="flex items-center gap-1.5 rounded-md bg-fuchsia-50 px-2.5 py-1 text-fuchsia-700"><Grid3x3 size={13} /> EEGNet (red: filtros aprendidos)</span>
+        )}
         <span className="text-slate-300">→</span>
         <span className="rounded-md bg-slate-100 px-2.5 py-1">decisión</span>
       </div>
