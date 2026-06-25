@@ -1,5 +1,8 @@
 import { useNavigate } from 'react-router-dom'
-import { Activity, ArrowRight, BarChart3, Brain, Network, Radio, Scale } from 'lucide-react'
+import {
+  Activity, ArrowRight, BarChart3, Brain, Network, Radio, Scale,
+  CheckCircle2, Loader, Circle, LayoutDashboard, BookOpen,
+} from 'lucide-react'
 import { HelpButton, type HelpContent } from '../components/HelpButton'
 import { DATASET_LIST } from '../lib/datasets'
 
@@ -37,6 +40,42 @@ const PILLARS = [
     color: 'var(--accent-metric)',
     desc: 'Enfrentamos el pipeline matemático clásico contra EEGNet, analizando si la IA hereda la lógica humana al auto-aprender.',
   },
+]
+
+// Las tres etapas del proyecto (ver CLAUDE.md / Instrucciones.txt) con su estado real.
+type StageStatus = 'done' | 'progress' | 'todo'
+const STAGES: { n: string; title: string; desc: string; status: StageStatus }[] = [
+  {
+    n: '1',
+    title: 'Pipeline LTI + clasificación offline',
+    desc: 'Backend en Python: convolución y FIR a mano, CSP, LDA y EEGNet, validación honesta y simulación de streaming causal sobre datasets públicos.',
+    status: 'done',
+  },
+  {
+    n: '2',
+    title: 'Frontend didáctico (esta web)',
+    desc: 'SPA en React que abre la caja negra: cada etapa lineal es navegable e interactiva, con la teoría enlazada al glosario.',
+    status: 'progress',
+  },
+  {
+    n: '3',
+    title: 'Interoperabilidad',
+    desc: 'Capa de control externo: juegos vía LSL, Arduino por Serial y, a futuro, un casco real Ultracortex Mark IV. Aún no iniciada.',
+    status: 'todo',
+  },
+]
+
+const STAGE_STYLE: Record<StageStatus, { icon: typeof CheckCircle2; label: string; cls: string; dot: string }> = {
+  done: { icon: CheckCircle2, label: 'Completada', cls: 'border-emerald-200 bg-emerald-50/40', dot: 'text-emerald-600' },
+  progress: { icon: Loader, label: 'En progreso', cls: 'border-amber-200 bg-amber-50/40', dot: 'text-amber-600' },
+  todo: { icon: Circle, label: 'Pendiente', cls: 'border-slate-200 bg-slate-50/60', dot: 'text-slate-400' },
+}
+
+// Accesos directos a las secciones que no tienen tarjeta propia arriba.
+const MORE_LINKS = [
+  { label: 'Dashboard', desc: 'Panel configurable', to: '/dashboard', icon: LayoutDashboard, color: 'var(--accent-metric)' },
+  { label: 'Cerebro 3D', desc: 'Mapa cortical µ/β en vivo', to: '/brain', icon: Brain, color: 'var(--accent-signal)' },
+  { label: 'Glosario', desc: 'Términos clave explicados', to: '/glossary', icon: BookOpen, color: 'var(--accent-fir)' },
 ]
 
 // Bloques del pipeline: cada uno enlaza a su análisis matemático.
@@ -189,7 +228,60 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 5 · Rendimiento base ----------------------------------------------- */}
+      {/* 5 · Estado del proyecto (3 etapas) --------------------------------- */}
+      <section>
+        <h2 className="text-lg font-bold text-slate-800">El proyecto en tres etapas</h2>
+        <p className="mt-1 max-w-3xl text-sm text-slate-500">
+          Un trabajo de Sistemas Lineales y Señales que va del procesamiento matemático de la
+          señal a su uso interactivo. Estado actual de cada etapa:
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {STAGES.map((s) => {
+            const st = STAGE_STYLE[s.status]
+            const Icon = st.icon
+            return (
+              <div key={s.n} className={`rounded-2xl border p-5 ${st.cls}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Etapa {s.n}</span>
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${st.dot}`}>
+                    <Icon size={15} className={s.status === 'progress' ? 'animate-pulse' : ''} /> {st.label}
+                  </span>
+                </div>
+                <h3 className="mt-2 font-bold text-slate-800">{s.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{s.desc}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 6 · Accesos a las secciones restantes ------------------------------ */}
+      <section>
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">Explora todas las secciones</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {MORE_LINKS.map((m) => {
+            const Icon = m.icon
+            return (
+              <button
+                key={m.to}
+                onClick={() => nav(m.to)}
+                className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-card transition hover:-translate-y-1 hover:shadow-md"
+              >
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: `color-mix(in srgb, ${m.color} 15%, white)` }}>
+                  <Icon size={22} style={{ color: m.color }} />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-700 group-hover:text-slate-900">{m.label}</div>
+                  <div className="text-xs text-slate-400">{m.desc}</div>
+                </div>
+                <ArrowRight size={16} className="ml-auto shrink-0 text-slate-300 transition group-hover:translate-x-1" />
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 7 · Rendimiento base ----------------------------------------------- */}
       <section>
         <h2 className="text-lg font-bold text-slate-800">Rendimiento Base (Within-Subject)</h2>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">

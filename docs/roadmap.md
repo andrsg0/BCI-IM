@@ -167,7 +167,10 @@ esfera/scalp, con heatmap cortical en GPU.
 - [x] **Página de Inicio — HECHO (primera mejora).** Añadidas secciones "Sobre el proyecto"
       (qué es, foco LTI, datos públicos, techo ~70–85 %) y "Los dos mundos" (offline/online),
       sobre el diagrama del pipeline y las métricas. Ref: `frontend/src/pages/Home.tsx`.
-      Pendiente (ampliación): estado de las 3 etapas y accesos a las secciones restantes.
+      **Ampliación HECHA:** añadidas la sección «El proyecto en tres etapas» (estado real de
+      cada etapa: 1 pipeline LTI ✓, 2 frontend en progreso, 3 interoperabilidad pendiente) y
+      una fila «Explora todas las secciones» con accesos a Dashboard, Cerebro 3D y Glosario
+      (las que no tenían tarjeta propia en Inicio).
 - [ ] **Dashboard configurable:** menú para **insertar/quitar** gráficos de cualquier
       sección (cerebro 3D, clasificación, pipeline, etc.). Extender `GridBoard` (no usar
       `react-grid-layout`). Refs: `pages/Dashboard.tsx`, `components/GridBoard.tsx`.
