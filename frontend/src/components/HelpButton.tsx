@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { HelpCircle, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useGlossary, findEntry, previewText, type GlossaryEntry } from '../lib/glossary'
+import { GlossaryText } from './GlossaryText'
 
 export interface HelpContent {
   /** etapa del pipeline a la que pertenece la sección (badge superior) */
@@ -71,12 +72,15 @@ export function HelpButton({ title, help }: { title: string; help: HelpContent }
               </div>
             )}
 
-            <p className="text-sm leading-relaxed text-slate-600">{help.intro}</p>
+            <p className="text-sm leading-relaxed text-slate-600">
+              <GlossaryText onNavigate={() => setOpen(false)}>{help.intro}</GlossaryText>
+            </p>
 
             <ul className="mt-4 space-y-3">
               {help.points.map((p, i) => (
                 <li key={i} className="text-sm leading-relaxed text-slate-600">
-                  <span className="font-semibold text-slate-700">{p.label}.</span> {p.desc}
+                  <span className="font-semibold text-slate-700">{p.label}.</span>{' '}
+                  <GlossaryText onNavigate={() => setOpen(false)}>{p.desc}</GlossaryText>
                 </li>
               ))}
             </ul>

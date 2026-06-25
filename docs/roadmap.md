@@ -240,10 +240,14 @@ con electrodos; no es una malla anatómica y no carga ningún modelo.
 
 - [ ] **Mejorar el glosario:** términos hoy difíciles de entender, redactar más claro.
       Fuente única: `docs/glosario.md` (servida por `/api/glossary`).
-- [ ] **Ligar el texto explicativo de cada sección al glosario.** Hoy los paneles de ayuda
-      (`HelpContent.terms`) ya enlazan términos al glosario; extender esos enlaces al cuerpo
-      del texto explicativo, no solo a la lista de términos. Refs: `components/HelpButton.tsx`,
-      `pages/Glossary.tsx` (ya soporta `?q=` para abrir filtrado).
+- [x] **Ligar el texto explicativo de cada sección al glosario — HECHO.** Nuevo componente
+      reutilizable `components/GlossaryText.tsx`: detecta términos del glosario dentro de
+      texto plano (alias derivados de los títulos `### …` vía `buildGlossaryMatcher` en
+      `lib/glossary.ts`, matching tolerante sin acentos, longest-first, solo la 1ª aparición)
+      y los enlaza in-situ con preview al hover. Aplicado al `intro` y a las descripciones de
+      cada punto en `components/HelpButton.tsx` (antes solo se enlazaban los chips de
+      «Términos clave»). El componente es genérico: sirve para la ampliación «detectar
+      términos en CUALQUIER texto/sección» — basta envolver el texto en `<GlossaryText>`.
 - [x] **Preview al hover — HECHO (términos clave).** Cache cliente del glosario
       (`lib/glossary.ts`: `useGlossary`, `findEntry`, `previewText`) + chips de "Términos
       clave" en los paneles de ayuda (`HelpButton.tsx`) que muestran la definición al pasar
