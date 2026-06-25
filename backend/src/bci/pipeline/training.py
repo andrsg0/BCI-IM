@@ -184,12 +184,13 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
     solo un filtrado de banda amplia (4–40 Hz) y el recorte a la ventana activa. La red
     aprende ella misma los filtros temporales (≈ FIR) y espaciales (≈ CSP).
 
-    Como EEGNet ya **no se usa en vivo**, el modelo que se guarda (y cuyos filtros se
-    visualizan) se entrena con **todos los trials** del sujeto: más datos ⇒ filtros más
-    limpios e interpretables. Para no mentir con la precisión, se reportan DOS números
-    honestos, medidos con modelos entrenados aparte:
-      - inter-sesión (train `0train` → test held-out): generalización a otro día (~baja).
-      - within-subject k-fold: el mejor caso justo con más datos (~media).
+    EEGNet SÍ se usa en vivo (decisión revertida jun 2026), así que el modelo guardado
+    debe ser HONESTO para la demo: se entrena con el MISMO split que CSP+LDA (todas las
+    sesiones menos la última; la última es el held-out que se transmite y que el modelo
+    NO vio). Sus filtros se visualizan desde ese modelo honesto. Se reporta además la
+    within-subject k-fold como el "mejor caso con calibración".
+      - inter-sesión (train split → held-out): generalización a otro día (la principal).
+      - within-subject k-fold: el mejor caso justo con todos los datos mezclados.
     """
     from bci.dsp.convolution import apply_filter
     from bci.dsp.fir_filters import design_bandpass_fir
@@ -214,19 +215,17 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
         return EEGNetClassifier(n_classes=n_classes, epochs=epochs, kern_length=kern,
                                 weight_decay=weight_decay)
 
-    # (1) Honestidad: inter-sesión (entrena solo con train, evalúa en el held-out).
-    is_clf = _new().fit(Xc[idx_train], y[idx_train])
-    res_is = _metrics(y[idx_demo], is_clf.predict(Xc[idx_demo]))
+    # (1) Modelo HONESTO que se guarda y se transmite en vivo: entrenado SOLO con el
+    # split de entrenamiento (sin ver el held-out). Sus filtros se visualizan de aquí.
+    clf = _new().fit(Xc[idx_train], y[idx_train])
+    res_is = _metrics(y[idx_demo], clf.predict(Xc[idx_demo]))   # inter-sesión honesta
+    n_temporal = int(clf.model.temporal[0].weight.shape[0])     # nº de filtros temporales (F1)
 
-    # (2) Honestidad: within-subject k-fold (el mejor caso justo, con más datos variados).
+    # (2) Honestidad: within-subject k-fold (el mejor caso justo, con datos mezclados).
     skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=42)
     accs = [accuracy_score(y[te], _new().fit(Xc[tr], y[tr]).predict(Xc[te]))
             for tr, te in skf.split(Xc, y)]
     acc_kfold = float(np.mean(accs))
-
-    # (3) Modelo de VISUALIZACIÓN: entrenado con TODOS los datos (filtros más limpios).
-    clf = _new().fit(Xc, y)
-    n_temporal = int(clf.model.temporal[0].weight.shape[0])   # nº de filtros temporales (F1)
 
     card = ModelCard(
         dataset=dataset,
@@ -237,7 +236,7 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
         channels=list(data.ch_names),
         holdout=holdout,
         train_session=train_session,
-        n_train=int(data.n_trials),          # el modelo visualizado usa todos los trials
+        n_train=int(len(idx_train)),         # honesto: el modelo solo vio el split de train
         n_demo=int(len(idx_demo)),
         accuracy=float(res_is.accuracy),     # principal = inter-sesión (coherente con CSP)
         kappa=float(res_is.kappa),
@@ -249,14 +248,15 @@ def train_eegnet_subject(cfg: dict, dataset: str, subject: int, epochs: int = 25
             "accuracy_kfold": acc_kfold,
             "folds": int(folds),
             "epochs": int(epochs),
-            "viz_trained_on": "all_trials",
+            "viz_trained_on": "train_split",
         },
     )
     return clf, card, data
 
 
 # --- Régimen cross-subject (opción A: persona nueva, 1 fold) ---------------
-def train_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subject: int):
+def train_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subject: int,
+                       data: EpochedData | None = None):
     """CSP+LDA CROSS-SUBJECT: entrena con ``subjects`` menos ``demo_subject``.
 
     Mismo pipeline que ``train_subject`` (FIR→CSP→log-var→LDA) pero el split es por
@@ -264,10 +264,16 @@ def train_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subjec
     sujeto-específico (sus filtros se ajustan a una anatomía), aquí suele rendir bajo
     — y ESE contraste con el within-subject es justamente lo didáctico.
 
+    ``data`` opcional: el pool ya cargado (todos los ``subjects``). Permite al
+    orquestador cargar el dataset UNA vez y reusarlo para cada sujeto demo (clave en
+    datasets grandes: evita recargar N sujetos por cada llamada). Si es ``None`` se
+    carga aquí (compatibilidad).
+
     Devuelve (pipeline, ficha, datos) — misma firma que ``train_subject``.
     """
-    cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
-    data = load_from_config(cfg)
+    if data is None:
+        cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
+        data = load_from_config(cfg)
     fs = data.sfreq
     y = np.asarray(data.y)
 
@@ -301,20 +307,24 @@ def train_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subjec
 def train_eegnet_crosssubject(cfg: dict, dataset: str, subjects: list[int], demo_subject: int,
                               epochs: int = 250, weight_decay: float = 1e-3,
                               device: str | None = None, augment: bool = False,
-                              augment_copies: int = 2):
+                              augment_copies: int = 2, data: EpochedData | None = None):
     """EEGNet CROSS-SUBJECT: entrena con ``subjects`` menos ``demo_subject``.
 
     Es el régimen donde el deep learning brilla frente a CSP: una red entrenada con
     muchas personas puede generalizar (algo) a una nueva sin calibrar. Un solo
     entrenamiento (no LOSO completo): el más caro de los cuatro regímenes.
 
+    ``data`` opcional: el pool ya cargado (ver ``train_crosssubject``), para no
+    recargar el dataset por cada sujeto demo.
+
     Devuelve (clf, ficha, datos) — misma firma que ``train_eegnet_subject``.
     """
     from bci.datasets.augment import augment_trials
     from bci.models.eegnet import EEGNetClassifier, pick_device
 
-    cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
-    data = load_from_config(cfg)
+    if data is None:
+        cfg = {**cfg, "dataset": {**cfg["dataset"], "subjects": list(subjects)}}
+        data = load_from_config(cfg)
     y = np.asarray(data.y)
 
     Xc, fs, kern, high = _eegnet_features(cfg, data)
