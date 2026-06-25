@@ -11,8 +11,8 @@ Uso:
     python scripts/train_eegnet_pooled.py --config ../configs/default.yaml --subjects 1 2 3 --epochs 200 --no-loso
 
 Run "máximo" (muchos datos, ver docs/entrenamiento.md):
-    python scripts/train_eegnet_pooled.py --config ../configs/physionet.yaml \
-        --subjects {1..109} --epochs 300 --augment --loso-subset 25   # llaves: zsh y bash las separan
+    python scripts/train_eegnet_pooled.py --config ../configs/kumar2024.yaml \
+        --subjects {1..18} --epochs 300 --augment --loso-subset 25   # llaves: zsh y bash las separan
 """
 from __future__ import annotations
 

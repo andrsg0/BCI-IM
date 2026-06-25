@@ -23,7 +23,7 @@ import pandas as pd
 
 from bci.config import BACKEND_ROOT, load_config, resolve_path
 from bci.datasets.moabb_loader import load_dataset
-from bci.pipeline.offline import evaluate_by_session, evaluate_kfold
+from bci.pipeline.offline import MotorImageryPipeline, _metrics, evaluate_kfold
 
 FIG_DIR = BACKEND_ROOT.parent / "docs" / "figures"
 
@@ -58,8 +58,18 @@ def main() -> None:
         kf = evaluate_kfold(cfg, data.X, data.y, fs=data.sfreq, n_splits=args.folds)
         row = {"subject": s, "n_trials": data.n_trials,
                "kfold_acc": kf.accuracy, "kfold_kappa": kf.kappa}
-        if {"0train", "1test"} <= set(data.metadata["session"].unique()):
-            iss = evaluate_by_session(cfg, data.X, data.y, data.metadata, fs=data.sfreq)
+        # Inter-sesión (estimación "otro día") para CUALQUIER dataset de ≥2 sesiones:
+        # entrena con todas las sesiones menos la última y evalúa en la última (mismo
+        # criterio que split_train_demo, así coincide con el held-out de la demo en vivo).
+        import numpy as _np
+        sess = data.metadata["session"].to_numpy()
+        sessions = sorted(set(sess.tolist()))
+        if len(sessions) >= 2:
+            demo = sessions[-1]
+            tr = sess != demo
+            te = sess == demo
+            pipe = MotorImageryPipeline(cfg, fs=data.sfreq).fit(data.X[tr], _np.asarray(data.y)[tr])
+            iss = _metrics(_np.asarray(data.y)[te], pipe.predict(data.X[te]))
             row["intersession_acc"] = iss.accuracy
             row["intersession_kappa"] = iss.kappa
         rows.append(row)

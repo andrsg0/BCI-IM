@@ -1,0 +1,47 @@
+# ============================================================
+# Kumar2024 (MOABB: Kumar2024)
+# Imaginación motora izquierda/derecha, 18 sujetos, 6 sesiones reales.
+# 22 canales (incl. C3/Cz/C4), fs = 512 Hz. Descarga pesada (ZIP 4.47 GB).
+# ============================================================
+
+dataset:
+  name: "Kumar2024"
+  subjects: [1]
+  classes: ["left_hand", "right_hand"]   # nativo 2-clases
+
+epoching:
+  # En Kumar el trial de imaginación va de 0 s a 5 s (dataset.interval = [0, 5]).
+  tmin: 0.0
+  tmax: 5.0
+  picks: "eeg"           # 22 canales
+  baseline: null
+
+classification_window:
+  tmin_rel: 0.5
+  tmax_rel: 2.5          # ventana de 2 s
+
+# Filtro FIR pasa-banda mu+beta (8-30 Hz). fs = 512 Hz.
+fir_filter:
+  low_hz: 8.0
+  high_hz: 30.0
+  num_taps: 205          # ~0.4 s a 512 Hz; impar => fase lineal
+  window: "hamming"
+  fs: 512
+
+csp:
+  n_components: 4
+  log_variance: true
+  shrinkage: 0.1
+
+classifier:
+  type: "lda"
+  cv_folds: 5
+
+streaming:
+  window_s: 2.0
+  step_s: 0.1
+  realtime_factor: 1.0
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"

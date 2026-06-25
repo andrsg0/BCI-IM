@@ -65,13 +65,20 @@ def split_train_demo(data: EpochedData):
 
     ``idx_demo`` son los trials que se reservan para el streaming en vivo y que el
     modelo NO verá durante el entrenamiento.
+
+    Con ≥2 sesiones, la demo es la ÚLTIMA sesión y el entrenamiento usa TODAS las
+    demás (no solo la primera): así se aprovechan todos los datos en datasets de
+    varias sesiones (2b=5, Kumar=6) sin dejar de ser una estimación honesta
+    inter-sesión (train y demo no comparten día). En el 2a (2 sesiones) esto equivale
+    al split de siempre: entrena en '0train', demo en '1test'.
     """
     sessions = sorted(data.metadata["session"].unique().tolist())
     if len(sessions) >= 2:
-        train_session, demo_session = sessions[0], sessions[1]
+        demo_session = sessions[-1]                       # la última sesión = demo
         sess = data.metadata["session"].to_numpy()
-        idx_train = np.where(sess == train_session)[0]
+        idx_train = np.where(sess != demo_session)[0]     # TODAS las demás = entrenamiento
         idx_demo = np.where(sess == demo_session)[0]
+        train_session = "+".join(str(s) for s in sessions if s != demo_session)
         return idx_train, idx_demo, {"by": "session", "value": demo_session}, train_session
     # Una sola sesión: reservamos una fracción estratificada como demo.
     idx = np.arange(len(data.y))

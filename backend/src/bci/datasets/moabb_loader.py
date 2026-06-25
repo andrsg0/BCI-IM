@@ -90,7 +90,7 @@ def _get_dataset(name: str):
     except AttributeError as exc:
         raise ValueError(
             f"Dataset '{name}' no existe en moabb.datasets. "
-            f"Ejemplos válidos: BNCI2014_001, PhysionetMI, Cho2017."
+            f"Ejemplos válidos: BNCI2014_001, BNCI2014_004, Kumar2024."
         ) from exc
     params = inspect.signature(dataset_cls.__init__).parameters
     accepts = "accept" in params or any(

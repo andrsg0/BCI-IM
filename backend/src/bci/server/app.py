@@ -49,14 +49,13 @@ VALID_METHODS = WITHIN_METHODS + CROSS_METHODS
 # en "Resultados" (su benchmark de población); los de ≥2 sesiones aparecen ADEMÁS en la
 # "Demo en vivo". Antes esto era un campo 'role' ('live'/'training') que había que poner
 # a mano y excluía el dataset live de Resultados — eliminado en jun 2026.
+# Lista final (jun 2026): 3 datasets de imaginación motora izq./der. con ≥2 sesiones
+# reales (todos aptos para la demo en vivo inter-sesión). accuracy = provisional;
+# la media real por dataset la calcula /api/results desde los artefactos entrenados.
 REGISTRY = {
     'BNCI2014_001': {'label': 'BCI IV 2a', 'config': 'configs/default.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.688, 'sessions': 2},
-    'PhysionetMI': {'label': 'PhysioNet MMI', 'config': 'configs/physionet.yaml', 'subjects': 109, 'fs': 160, 'accuracy': 0.608, 'sessions': 1},
-    'Liu2024': {'label': 'Liu2024', 'config': 'configs/liu2024.yaml', 'subjects': 50, 'fs': 500, 'accuracy': 0.536, 'sessions': 1},
-    # Datasets nuevos (ver docs/datasets.md). accuracy = provisional (medida en pocos
-    # sujetos); reemplazar por la media real con scripts/evaluate_all.py.
-    'Dreyer2023': {'label': 'Dreyer2023', 'config': 'configs/dreyer2023.yaml', 'subjects': 87, 'fs': 512, 'accuracy': 0.696, 'sessions': 1},
-    'Cho2017': {'label': 'Cho2017', 'config': 'configs/cho2017.yaml', 'subjects': 52, 'fs': 512, 'accuracy': 0.755, 'sessions': 1},
+    'BNCI2014_004': {'label': 'BCI IV 2b', 'config': 'configs/bci2b.yaml', 'subjects': 9, 'fs': 250, 'accuracy': 0.604, 'sessions': 5},
+    'Kumar2024': {'label': 'Kumar2024', 'config': 'configs/kumar2024.yaml', 'subjects': 18, 'fs': 512, 'accuracy': 0.644, 'sessions': 6},
 }
 
 

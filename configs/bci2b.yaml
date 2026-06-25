@@ -1,0 +1,51 @@
+# ============================================================
+# BCI Competition IV 2b (MOABB: BNCI2014_004)
+# Imaginación motora izquierda/derecha, 9 sujetos, 5 sesiones reales.
+# Ligero: SOLO 3 canales (C3, Cz, C4) → CSP con 2 componentes.
+# ============================================================
+
+dataset:
+  name: "BNCI2014_004"     # BCI IV 2b
+  subjects: [1]
+  classes: ["left_hand", "right_hand"]   # nativo 2-clases
+
+epoching:
+  # Ventana relativa al onset del trial. En el 2b el cue de imaginación va de
+  # 3 s a 7.5 s (dataset.interval = [3, 7.5]); usamos esa ventana completa (4.5 s).
+  tmin: 3.0
+  tmax: 7.5
+  picks: "eeg"           # 3 canales: C3, Cz, C4
+  baseline: null
+
+# Recorte a la fase de imaginación ACTIVA (relativo al inicio del epoch [3, 7.5]s):
+# descarta el transitorio del FIR y toma la sub-ventana más discriminativa.
+classification_window:
+  tmin_rel: 0.5          # 0.5 s tras el cue
+  tmax_rel: 2.5          # ventana de 2 s
+
+# Filtro FIR pasa-banda mu+beta (8-30 Hz). Misma fs que el 2a (250 Hz).
+fir_filter:
+  low_hz: 8.0
+  high_hz: 30.0
+  num_taps: 101          # ~0.4 s a 250 Hz; impar => fase lineal
+  window: "hamming"
+  fs: 250
+
+# CSP: con solo 3 canales, n_components debe ser par y <= nº de canales => 2.
+csp:
+  n_components: 2
+  log_variance: true
+  shrinkage: 0.1         # >0 estabiliza con pocos canales/trials
+
+classifier:
+  type: "lda"
+  cv_folds: 5
+
+streaming:
+  window_s: 2.0
+  step_s: 0.1
+  realtime_factor: 1.0
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"

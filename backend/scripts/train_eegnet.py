@@ -6,7 +6,7 @@ clásico. Ambos se evalúan con los mismos folds para una comparación justa.
 
 Uso:
     python scripts/train_eegnet.py --subjects 1
-    python scripts/train_eegnet.py --config configs/physionet.yaml --subjects 1 2 3 --epochs 200
+    python scripts/train_eegnet.py --config configs/bci2b.yaml --subjects 1 2 3 --epochs 200
 """
 from __future__ import annotations
 

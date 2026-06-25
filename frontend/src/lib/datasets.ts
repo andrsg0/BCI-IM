@@ -1,7 +1,7 @@
 // Catálogo de datasets (espejo de los configs del backend). El backend dará la
 // lista real de canales/sujetos; aquí hay valores por defecto para los selectores.
 
-export type DatasetId = 'BNCI2014_001' | 'PhysionetMI' | 'Liu2024'
+export type DatasetId = 'BNCI2014_001' | 'BNCI2014_004' | 'Kumar2024'
 
 export interface DatasetInfo {
   id: DatasetId
@@ -25,8 +25,8 @@ const MOTOR_CHANNELS = [
 
 export const DATASETS: Record<DatasetId, DatasetInfo> = {
   BNCI2014_001: { id: 'BNCI2014_001', label: 'BCI IV 2a', subjects: 9, fs: 250, channels: MOTOR_CHANNELS, accuracy: 0.688, sessions: 2 },
-  PhysionetMI: { id: 'PhysionetMI', label: 'PhysioNet MMI', subjects: 109, fs: 160, channels: MOTOR_CHANNELS, accuracy: 0.608, sessions: 1 },
-  Liu2024: { id: 'Liu2024', label: 'Liu2024', subjects: 50, fs: 500, channels: MOTOR_CHANNELS, accuracy: 0.536, sessions: 1 },
+  BNCI2014_004: { id: 'BNCI2014_004', label: 'BCI IV 2b', subjects: 9, fs: 250, channels: ['C3', 'Cz', 'C4'], accuracy: 0.604, sessions: 5 },
+  Kumar2024: { id: 'Kumar2024', label: 'Kumar2024', subjects: 18, fs: 512, channels: MOTOR_CHANNELS, accuracy: 0.644, sessions: 6 },
 }
 
 export const DATASET_LIST = Object.values(DATASETS)

@@ -11,7 +11,7 @@ Este script es la frontera explícita entre las dos fases del proyecto:
 Uso:
     python scripts/train_model.py                       # 2a, sujeto 1
     python scripts/train_model.py --subjects 1 2 3
-    python scripts/train_model.py --config configs/physionet.yaml --subjects 1
+    python scripts/train_model.py --config configs/bci2b.yaml --subjects 1
 """
 from __future__ import annotations
 

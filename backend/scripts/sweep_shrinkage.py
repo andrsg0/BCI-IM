@@ -5,8 +5,8 @@ Evalúa el pipeline con varios valores de shrinkage γ y reporta la accuracy med
 Carga cada sujeto UNA vez y reutiliza los datos para todos los γ.
 
 Uso:
-    python scripts/sweep_shrinkage.py --config configs/liu2024.yaml --subjects $(seq 1 20)
-    python scripts/sweep_shrinkage.py --config configs/physionet.yaml --subjects $(seq 1 20)
+    python scripts/sweep_shrinkage.py --config configs/bci2b.yaml --subjects $(seq 1 20)
+    python scripts/sweep_shrinkage.py --config configs/kumar2024.yaml --subjects $(seq 1 20)
     python scripts/sweep_shrinkage.py --gammas 0 0.05 0.1 0.2 0.3 0.5
 
 Salidas: tabla en consola + docs/figures/shrinkage_sweep_<dataset>.png
