@@ -29,7 +29,10 @@ Hoy CSP+LDA es **sujeto-específico** y EEGNet solo se usa para *visualizar* fil
       (~0.69 k-fold), lo que motiva el fine-tuning con calibración corta (siguiente paso).
 - [ ] *Fine-tuning* con capas congeladas + calibración corta del sujeto nuevo
       (transfer learning), para acercarse al rendimiento sujeto-específico. (siguiente paso)
-- [ ] Exponer los resultados pooled/LOSO en el frontend (página de comparación estadística).
+- [x] Exponer los resultados pooled/LOSO en el frontend — HECHO. La página Resultados
+      (`pages/Results.tsx`) muestra `PooledCard` (media LOSO, nº sujetos del pool, trials,
+      épocas, banda, dispositivo, fecha) y `AggregateMatrix` (matriz 2×2 agregada por sujeto
+      sobre todos los datasets + Wilcoxon). Endpoints `/api/results*` y `/api/results_aggregate`.
 - Refs: `backend/src/bci/models/eegnet.py`, `pipeline/training.py`
   (`train_eegnet_subject`, `train_eegnet_pooled`), `docs/presentacion.md` ("Próximos pasos").
 - **Abierto:** ¿EEGNet pooled llega a usarse en vivo, o sigue siendo solo comparación
@@ -126,26 +129,36 @@ en lugar de reproducir trials recortados con fronteras conocidas.
       ventana activa por trial (`app.py:427-428`) y el front filtra por ellos
       (`LiveStream.tsx:156`). En señal continua no hay fronteras: clasificar de forma
       continua con **umbral de confianza / abstención** en vez de votar dentro del trial.
-- [ ] **B.3 — Widget "muñeco de brazos".** Persona con dos brazos que reacciona a la
-      clasificación en vivo (mueve brazo izq./der. según la predicción). Es la salida
-      intuitiva de la demo continua.
-- **Abierto:** ¿El widget de brazos vive en Clasificación (`/live`), en su propia página,
-  o como widget insertable en el Dashboard (ver sección Dashboard)?
+- [x] **B.3 — Widget "muñeco de brazos" — HECHO.** `components/HandPuppet.tsx`: muñeco SVG
+      (vista de espaldas, sin espejo: mano izq. del muñeco = izq. del espectador) que levanta
+      y saluda con el brazo correspondiente. **Decidido (matiz del usuario):** se mueve según
+      la **ETIQUETA REAL** del trial (`true`), NO la predicción del modelo, y solo durante la
+      franja de imaginación activa `[alo, ahi]` (cuando la persona realmente empieza a mover
+      la mano). El color es el de la clase; funciona en los 4 regímenes (el servidor ya manda
+      `true`/`alo`/`ahi`). Integrado como widget `puppet` en `pages/LiveStream.tsx`
+      (helper `handSideFromLabel`). Sirve para contrastar visualmente «lo que la persona hacía»
+      contra «lo que el modelo predijo».
+- **Resuelto:** el muñeco vive en **Clasificación (`/live`)** como un widget más del GridBoard
+  (queda reubicable y, cuando exista el catálogo del Dashboard configurable, insertable allí).
 
-## C. Cerebro 3D anatómico (GLB)
+## C. Cerebro 3D anatómico (GLB) — HECHO
 
-El "cerebro 3D" actual (`components/Brain3D.tsx`) es una **esfera procedural** translúcida
-con electrodos; no es una malla anatómica y no carga ningún modelo.
+Implementado: el cerebro 3D ya carga una **malla anatómica** real (`.glb`) dentro de la
+esfera/scalp, con heatmap cortical en GPU.
 
-- [ ] Conseguir un `.glb` de cerebro/cabeza de baja-media densidad con licencia clara
-      (CC0/CC-BY). Revisar atribución antes de meterlo al repo.
-- [ ] Servirlo desde `frontend/public/models/` y cargarlo con `useGLTF` de
-      `@react-three/drei` (ya es dependencia) en un componente nuevo `BrainMesh.tsx`.
-- [ ] Reconciliar posición de electrodos (hoy `s = 0.96 / maxNorm` asume esfera unitaria).
-      Opción simple: mantener la esfera translúcida como "scalp" y meter el cerebro real
-      dentro; opción fiel: reescalar a la bounding box de la malla.
-- [ ] Comprimir el `.glb` (Draco) si pesa, para no inflar el bundle.
-- **Abierto:** ¿reemplaza la esfera actual o se superpone? (por defecto: superpuesto).
+- [x] `.glb` de cerebro servido desde `frontend/public/models/brain.glb` (~204 KB, ligero).
+- [x] Cargado con `useGLTF` de `@react-three/drei` en el componente `components/BrainMesh.tsx`
+      (auto-centra/auto-escala por bounding box; `useGLTF.preload`).
+- [x] Electrodos reconciliados sobre una **cáscara elipsoidal** (no clavados en la corteza):
+      cada electrodo se sitúa donde su dirección de montaje corta el elipsoide del cerebro,
+      con margen para que floten justo por encima (independiente de la quiralidad del modelo).
+- [x] **Heatmap cortical** µ/β inyectado en el material vía `onBeforeCompile` (interpolación
+      gaussiana por píxel sobre distancia angular en GLSL; solo se actualiza el uniform
+      `uValues[]` por frame, sin recrear geometría).
+- **Decidido (resuelto):** se **superpone** — la esfera translúcida queda como "scalp" y la
+      malla real va dentro. Integrado en `components/Brain3D.tsx` (`<BrainMesh … />`).
+- Pendiente opcional (no bloqueante): comprimir con Draco si en el futuro se usa un `.glb`
+      más pesado (el actual no lo necesita).
 
 ---
 

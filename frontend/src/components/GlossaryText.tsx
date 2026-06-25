@@ -47,14 +47,15 @@ export function GlossaryText({ children, onNavigate }: {
     const out: (string | { text: string; entry: GlossaryEntry })[] = []
     const seen = new Set<string>()       // term.term ya enlazado en este texto
     let last = 0
-    matcher.regex.lastIndex = 0
-    for (let mm = matcher.regex.exec(children); mm; mm = matcher.regex.exec(children)) {
+    // matchAll clona el regex internamente: no muta el lastIndex del compartido (cacheado).
+    for (const mm of children.matchAll(matcher.regex)) {
+      const idx = mm.index ?? 0
       const entry = entryForAlias(mm[1], matcher)
       if (entry && !seen.has(entry.term)) {
         seen.add(entry.term)
-        if (mm.index > last) out.push(children.slice(last, mm.index))
+        if (idx > last) out.push(children.slice(last, idx))
         out.push({ text: mm[1], entry })
-        last = mm.index + mm[1].length
+        last = idx + mm[1].length
       }
     }
     if (last < children.length) out.push(children.slice(last))

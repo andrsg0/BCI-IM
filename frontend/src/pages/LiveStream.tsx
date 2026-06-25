@@ -6,6 +6,7 @@ import type { HelpContent } from '../components/HelpButton'
 import { GridBoard, type GridWidget } from '../components/GridBoard'
 import { FillChart } from '../components/charts/FillChart'
 import { CSPSpaceLive, LDAAxisLive, type CSPHandle, type LDAHandle } from '../components/charts/PipelineStages'
+import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
 
@@ -38,6 +39,16 @@ interface ModelCard {
 }
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
+
+/** Mapea la etiqueta de clase a qué mano mueve el muñeco. */
+function handSideFromLabel(label: string | null | undefined, classes: string[]): HandSide {
+  if (!label) return null
+  const l = label.toLowerCase()
+  if (/left|izq/.test(l)) return 'left'
+  if (/right|der/.test(l)) return 'right'
+  const i = classes.indexOf(label)   // fallback por orden de clase
+  return i === 0 ? 'left' : i === 1 ? 'right' : null
+}
 const EMPTY: uPlot.AlignedData = [[], [], []]
 const EMPTY2: uPlot.AlignedData = [[], []]
 
@@ -210,6 +221,15 @@ export default function LiveStream() {
   const curDecided = !!cur && cur.conf >= threshold
   const curOk = curDecided && cur!.pred === cur!.t
 
+  // Muñeco demostrativo: se mueve según la ETIQUETA REAL del trial (no la predicción)
+  // y solo durante la franja de imaginación activa [alo, ahi] (cuando la persona
+  // realmente mueve/imagina la mano). Funciona en los 4 regímenes (el servidor manda
+  // 'true'/'alo'/'ahi' siempre).
+  const trueLabel = last?.['true'] ?? null
+  const puppetActive = !!last && (last.alo == null || last.ahi == null || (last.t >= last.alo && last.t <= last.ahi))
+  const movingSide = puppetActive && trueLabel ? handSideFromLabel(trueLabel, classes) : null
+  const puppetColor = trueLabel ? colorOf(trueLabel) : '#64748b'
+
   const widgets: GridWidget[] = [
     {
       i: 'stage-filt', title: '1 · Señal filtrada que entra', accent: 'fir', w: 4, h: 5, minW: 3, minH: 4,
@@ -264,6 +284,20 @@ export default function LiveStream() {
         <div className="flex flex-col items-center py-4">
           <div className="text-xl font-semibold text-slate-400">decidiendo…</div>
           <div className="mt-2 text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}% &lt; umbral {(threshold * 100).toFixed(0)}%</div>
+        </div>
+      ),
+    },
+    {
+      i: 'puppet', title: 'Movimiento real (etiqueta)', accent: 'signal', w: 4, h: 6, minW: 3, minH: 5,
+      el: (
+        <div className="flex h-full flex-col">
+          <div className="min-h-0 flex-1">
+            <HandPuppet moving={movingSide} label={trueLabel} active={puppetActive} color={puppetColor} />
+          </div>
+          <p className="pt-1 text-[11px] leading-snug text-slate-400">
+            El muñeco mueve la mano que la persona estaba imaginando, según la <strong>etiqueta real</strong> del
+            trial y solo durante la imaginación activa. Compáralo con la <strong>predicción</strong> del modelo.
+          </p>
         </div>
       ),
     },
