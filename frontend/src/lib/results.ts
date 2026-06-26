@@ -16,11 +16,18 @@ export interface SubjectRow {
   n_trials: number | null
   csp_within_acc?: number | null
   csp_within_kappa?: number | null
+  csp_within_sens?: number | null
+  csp_within_spec?: number | null
   csp_inter_acc?: number | null
   csp_inter_kappa?: number | null
+  csp_inter_sens?: number | null
+  csp_inter_spec?: number | null
   csp_cross_acc?: number | null
+  csp_cross_kappa?: number | null
   eegnet_within_acc?: number | null
+  eegnet_within_kappa?: number | null
   eegnet_cross_acc?: number | null
+  eegnet_cross_kappa?: number | null
 }
 
 export interface Significance {
@@ -65,6 +72,20 @@ export interface DatasetResult {
     csp: { within: number | null; cross: number | null }
     eegnet: { within: number | null; cross: number | null }
   }
+  /** ITR (bits/min) por método/escenario — fórmula de Wolpaw (2000). */
+  itr: {
+    csp: { within: number | null; cross: number | null }
+    eegnet: { within: number | null; cross: number | null }
+  }
+  /** Kappa matrix (espejo de accuracy matrix). */
+  kappa_matrix: {
+    csp: { within: number | null; cross: number | null }
+    eegnet: { within: number | null; cross: number | null }
+  }
+  /** Gini coefficient por métrica de accuracy (dispersión inter-sujeto). */
+  gini: Record<string, number>
+  /** Tiempo por decisión usado para el cálculo de ITR (streaming.window_s). */
+  trial_time_s: number
   significance: { within?: Significance; cross?: Significance }
   pooled: Pooled | null
 }
@@ -75,6 +96,7 @@ export interface AggregateResult {
     eegnet: { within: number | null; cross: number | null }
   }
   summary: Record<string, Stat>
+  gini: Record<string, number>
   significance: { within?: Significance; cross?: Significance }
   per_dataset: {
     id: string
@@ -82,6 +104,11 @@ export interface AggregateResult {
     live: boolean | null
     n: number
     cells: Record<string, number>
+    gini?: Record<string, number>
+    itr?: {
+      csp: { within: number | null; cross: number | null }
+      eegnet: { within: number | null; cross: number | null }
+    }
   }[]
   n_datasets: number
 }
@@ -96,6 +123,14 @@ export const pct = (x?: number | null) =>
 
 export const kappa = (x?: number | null) =>
   x === null || x === undefined || Number.isNaN(x) ? '—' : x.toFixed(2)
+
+/** ITR en bits/min formateado con 1 decimal. */
+export const fmtItr = (x?: number | null) =>
+  x === null || x === undefined || Number.isNaN(x) ? '—' : `${x.toFixed(1)}`
+
+/** Gini coefficient formateado con 3 decimales. */
+export const fmtGini = (x?: number | null) =>
+  x === null || x === undefined || Number.isNaN(x) ? '—' : x.toFixed(3)
 
 export const STATUS_LABEL: Record<ResultStatus, string> = {
   measured: 'Medido (2×2 completo)',

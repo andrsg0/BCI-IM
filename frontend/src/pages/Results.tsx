@@ -8,7 +8,7 @@ import type { HelpContent } from '../components/HelpButton'
 import { DatasetRolesNote } from '../components/DatasetRolesNote'
 import { ResultInterpretation } from '../components/ResultInterpretation'
 import {
-  fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, STATUS_LABEL,
+  fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, fmtItr, fmtGini, STATUS_LABEL,
   type DatasetResult, type SubjectRow, type ResultStatus, type AggregateResult,
 } from '../lib/results'
 
@@ -121,11 +121,23 @@ function RangeBar({ min, max, mean, chance }: { min: number; max: number; mean: 
 // ---------------------------------------------------------------------------
 function MatrixTable({ r }: { r: DatasetResult }) {
   const m = r.matrix
+  const itr = r.itr
+  const km = r.kappa_matrix
   const cellCls = (v: number | null, best: boolean) =>
     `rounded-lg p-3 text-center ${v === null ? 'bg-slate-50 text-slate-300'
       : best ? 'bg-emerald-50 ring-1 ring-emerald-300' : 'bg-slate-50'}`
   const bestWithin = pickBest(m.csp.within, m.eegnet.within)
   const bestCross = pickBest(m.csp.cross, m.eegnet.cross)
+
+  const CellContent = ({ acc, itrVal, kappaVal }: { acc: number | null; itrVal?: number | null; kappaVal?: number | null }) => (
+    <>
+      <div className="text-lg font-bold text-slate-800">{pct(acc)}</div>
+      <div className="mt-0.5 flex items-center justify-center gap-2 text-[10px] text-slate-400">
+        {kappaVal != null && <span>κ={kappa(kappaVal)}</span>}
+        {itrVal != null && <span>{fmtItr(itrVal)} bit/min</span>}
+      </div>
+    </>
+  )
 
   return (
     <Card title="Comparación de métodos (2×2)" right={<StatusBadge status={r.status} />}>
@@ -136,28 +148,67 @@ function MatrixTable({ r }: { r: DatasetResult }) {
 
         <div className="flex items-center text-xs font-semibold text-slate-500">CSP+LDA</div>
         <div className={cellCls(m.csp.within, bestWithin === 'csp')}>
-          <div className="text-lg font-bold text-slate-800">{pct(m.csp.within)}</div>
+          <CellContent acc={m.csp.within} itrVal={itr?.csp?.within} kappaVal={km?.csp?.within} />
         </div>
         <div className={cellCls(m.csp.cross, bestCross === 'csp')}>
-          <div className="text-lg font-bold text-slate-800">{pct(m.csp.cross)}</div>
+          <CellContent acc={m.csp.cross} itrVal={itr?.csp?.cross} kappaVal={km?.csp?.cross} />
         </div>
 
         <div className="flex items-center text-xs font-semibold text-slate-500">EEGNet</div>
         <div className={cellCls(m.eegnet.within, bestWithin === 'eegnet')}>
-          <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.within)}</div>
+          <CellContent acc={m.eegnet.within} itrVal={itr?.eegnet?.within} kappaVal={km?.eegnet?.within} />
         </div>
         <div className={cellCls(m.eegnet.cross, bestCross === 'eegnet')}>
-          <div className="text-lg font-bold text-slate-800">{pct(m.eegnet.cross)}</div>
+          <CellContent acc={m.eegnet.cross} itrVal={itr?.eegnet?.cross} kappaVal={km?.eegnet?.cross} />
         </div>
       </div>
 
       <div className="mt-3 space-y-1 text-xs text-slate-500">
-        <p>Azar = {pct(r.chance)} · {r.classes.join(' vs ')}</p>
+        <p>Azar = {pct(r.chance)} · {r.classes.join(' vs ')} · T = {r.trial_time_s}s</p>
         <SignificanceNote label="Within" sig={r.significance.within} />
         <SignificanceNote label="Cross" sig={r.significance.cross} />
         {!r.has_compare && <p className="text-amber-600">EEGNet/cross no evaluado en este dataset todavía (solo CSP+LDA within).</p>}
       </div>
+
+      {/* Gini indicator */}
+      <GiniIndicator gini={r.gini} />
     </Card>
+  )
+}
+
+// Gini: variabilidad inter-sujeto (0=uniforme, 1=concentrada).
+const GINI_LABELS: Record<string, string> = {
+  csp_within_acc: 'CSP within',
+  csp_inter_acc: 'CSP inter',
+  csp_cross_acc: 'CSP cross',
+  eegnet_within_acc: 'EEGNet within',
+  eegnet_cross_acc: 'EEGNet cross',
+}
+
+function GiniIndicator({ gini }: { gini: Record<string, number> }) {
+  const entries = Object.entries(gini).filter(([k]) => k in GINI_LABELS)
+  if (entries.length === 0) return null
+  return (
+    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Gini · variabilidad inter-sujeto
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {entries.map(([k, v]) => {
+          const color = v < 0.05 ? 'bg-emerald-400' : v < 0.12 ? 'bg-amber-400' : 'bg-red-400'
+          return (
+            <span key={k} className="flex items-center gap-1 text-[11px] text-slate-600"
+              title={`Gini = ${v.toFixed(4)}: ${v < 0.05 ? 'homogéneo (baja variabilidad)' : v < 0.12 ? 'variabilidad moderada' : 'alta variabilidad (BCI illiteracy)'}`}>
+              <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
+              {GINI_LABELS[k]}: {fmtGini(v)}
+            </span>
+          )
+        })}
+      </div>
+      <p className="mt-1 text-[10px] text-slate-400">
+        Gini bajo ({'<'}0.05) = rendimiento uniforme · alto ({'>'}0.12) = alta dispersión entre sujetos
+      </p>
+    </div>
   )
 }
 
@@ -320,10 +371,15 @@ const COLS: { key: keyof SubjectRow; label: string; fmt: (v: unknown) => string 
   { key: 'n_trials', label: 'Trials', fmt: (v) => (v == null ? '—' : String(v)) },
   { key: 'csp_within_acc', label: 'CSP within', fmt: (v) => pct(v as number) },
   { key: 'csp_within_kappa', label: 'κ', fmt: (v) => kappa(v as number) },
+  { key: 'csp_within_sens', label: 'Sens', fmt: (v) => pct(v as number) },
+  { key: 'csp_within_spec', label: 'Spec', fmt: (v) => pct(v as number) },
   { key: 'csp_inter_acc', label: 'CSP inter-sesión', fmt: (v) => pct(v as number) },
   { key: 'csp_cross_acc', label: 'CSP cross', fmt: (v) => pct(v as number) },
+  { key: 'csp_cross_kappa', label: 'κ cross', fmt: (v) => kappa(v as number) },
   { key: 'eegnet_within_acc', label: 'EEGNet within', fmt: (v) => pct(v as number) },
+  { key: 'eegnet_within_kappa', label: 'κ EEG', fmt: (v) => kappa(v as number) },
   { key: 'eegnet_cross_acc', label: 'EEGNet cross', fmt: (v) => pct(v as number) },
+  { key: 'eegnet_cross_kappa', label: 'κ EEG×', fmt: (v) => kappa(v as number) },
 ]
 
 function SubjectTable({ r, selected, onPick }: {

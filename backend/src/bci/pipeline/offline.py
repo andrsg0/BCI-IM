@@ -108,10 +108,13 @@ class EvalResult:
     kappa: float
     confusion: np.ndarray
     labels: list[str]
+    sensitivity: float = 0.0
+    specificity: float = 0.0
     detail: str = ""
 
     def __str__(self) -> str:
-        head = f"  accuracy = {self.accuracy:.3f} | kappa = {self.kappa:.3f}"
+        head = (f"  accuracy = {self.accuracy:.3f} | kappa = {self.kappa:.3f}"
+                f" | sens = {self.sensitivity:.3f} | spec = {self.specificity:.3f}")
         cm = "  matriz de confusión (filas=real, col=pred):\n"
         cm += "    " + "  ".join(f"{l[:6]:>6}" for l in self.labels) + "\n"
         for i, l in enumerate(self.labels):
@@ -120,15 +123,71 @@ class EvalResult:
         return f"{head}\n{extra}{cm}"
 
 
+def _sens_spec(cm: np.ndarray) -> tuple[float, float]:
+    """Sensitivity y specificity desde una confusion matrix binaria.
+
+    Para el caso binario (2×2): sensitivity = TP/(TP+FN) (recall de la clase 0),
+    specificity = TN/(TN+FP) (recall de la clase 1). Para multiclase se promedia
+    la recall por clase (macro). Ambas = 0 si la matriz está vacía.
+    """
+    if cm.size == 0:
+        return 0.0, 0.0
+    # Recall por clase (diagonal / suma de fila). Evita división por cero.
+    per_class = np.diag(cm) / np.maximum(cm.sum(axis=1), 1)
+    if cm.shape[0] == 2:
+        return float(per_class[0]), float(per_class[1])
+    # Multiclase: macro-average.
+    return float(per_class.mean()), float(per_class.mean())
+
+
 def _metrics(y_true, y_pred, detail="") -> EvalResult:
     labels = sorted(np.unique(np.concatenate([y_true, y_pred])).tolist())
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    sens, spec = _sens_spec(cm)
     return EvalResult(
         accuracy=accuracy_score(y_true, y_pred),
         kappa=cohen_kappa_score(y_true, y_pred),
-        confusion=confusion_matrix(y_true, y_pred, labels=labels),
+        confusion=cm,
         labels=labels,
+        sensitivity=sens,
+        specificity=spec,
         detail=detail,
     )
+
+
+def itr(accuracy: float, n_classes: int, trial_time_s: float) -> float:
+    """Information Transfer Rate (bits/min) — fórmula de Wolpaw (2000).
+
+    Mide el throughput de una BCI: cuánta información se transmite por minuto,
+    balanceando precisión, nº de clases y velocidad de decisión. Es la métrica
+    estándar para comparar sistemas BCI en la literatura.
+
+    Parameters
+    ----------
+    accuracy : float
+        Fracción de clasificaciones correctas ∈ (0, 1].
+    n_classes : int
+        Número de posibles elecciones (N ≥ 2).
+    trial_time_s : float
+        Tiempo por selección en segundos (T > 0). En nuestro sistema corresponde
+        al ``streaming.window_s`` del YAML de cada dataset.
+
+    Returns
+    -------
+    float
+        ITR en bits/min. Devuelve 0.0 si la accuracy es ≤ 0, ≥ 1 o si los
+        parámetros son inválidos (evita log(0)).
+    """
+    N = n_classes
+    P = accuracy
+    T = trial_time_s
+    if N < 2 or T <= 0 or P <= 0 or P >= 1:
+        # En los extremos (P=0 o P=1) la fórmula tiene log(0); P=1 → ITR = log2(N)/T.
+        if P >= 1.0 and N >= 2 and T > 0:
+            return 60.0 / T * np.log2(N)
+        return 0.0
+    bits = np.log2(N) + P * np.log2(P) + (1 - P) * np.log2((1 - P) / (N - 1))
+    return float(60.0 / T * bits)
 
 
 def evaluate_kfold(cfg: dict, X, y, fs: float, n_splits: int = 5, seed: int = 42) -> EvalResult:

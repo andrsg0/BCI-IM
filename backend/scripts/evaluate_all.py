@@ -57,7 +57,8 @@ def main() -> None:
             continue
         kf = evaluate_kfold(cfg, data.X, data.y, fs=data.sfreq, n_splits=args.folds)
         row = {"subject": s, "n_trials": data.n_trials,
-               "kfold_acc": kf.accuracy, "kfold_kappa": kf.kappa}
+               "kfold_acc": kf.accuracy, "kfold_kappa": kf.kappa,
+               "kfold_sens": kf.sensitivity, "kfold_spec": kf.specificity}
         # Inter-sesión (estimación "otro día") para CUALQUIER dataset de ≥2 sesiones:
         # entrena con todas las sesiones menos la última y evalúa en la última (mismo
         # criterio que split_train_demo, así coincide con el held-out de la demo en vivo).
@@ -72,8 +73,10 @@ def main() -> None:
             iss = _metrics(_np.asarray(data.y)[te], pipe.predict(data.X[te]))
             row["intersession_acc"] = iss.accuracy
             row["intersession_kappa"] = iss.kappa
+            row["intersession_sens"] = iss.sensitivity
+            row["intersession_spec"] = iss.specificity
         rows.append(row)
-        msg = f"  sujeto {s}: k-fold acc={kf.accuracy:.3f} (κ={kf.kappa:.3f})"
+        msg = f"  sujeto {s}: k-fold acc={kf.accuracy:.3f} (κ={kf.kappa:.3f} sens={kf.sensitivity:.3f} spec={kf.specificity:.3f})"
         if "intersession_acc" in row:
             msg += f" | inter-sesión acc={row['intersession_acc']:.3f} (κ={row['intersession_kappa']:.3f})"
         print(msg)
@@ -82,7 +85,8 @@ def main() -> None:
 
     # ---- Resumen media ± std ----
     print("\n=== Resumen (media ± std sobre sujetos) ===")
-    for col in ["kfold_acc", "kfold_kappa", "intersession_acc", "intersession_kappa"]:
+    for col in ["kfold_acc", "kfold_kappa", "kfold_sens", "kfold_spec",
+                "intersession_acc", "intersession_kappa", "intersession_sens", "intersession_spec"]:
         if col in df:
             print(f"  {col:20s}: {df[col].mean():.3f} ± {df[col].std():.3f}")
 

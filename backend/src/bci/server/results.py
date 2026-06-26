@@ -21,6 +21,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from bci.pipeline.offline import itr as _itr_raw
+
 # Algunos CSV legados usan un alias en vez del nombre de clase MOABB
 # (p. ej. ``results_2a.csv`` para BNCI2014_001). Probamos el id y sus alias.
 _CSV_ALIASES: dict[str, list[str]] = {
@@ -53,6 +55,32 @@ def _stats(values: list[float]) -> dict | None:
         "max": float(arr.max()),
         "n": int(arr.size),
     }
+
+
+def _gini(values: list[float]) -> float | None:
+    """Coeficiente de Gini de una lista de accuracies (dispersión inter-sujeto).
+
+    Cuantifica la desigualdad en rendimiento entre sujetos: 0 = todos iguales,
+    1 = toda la "riqueza" (accuracy) concentrada en un sujeto. En BCI captura
+    el fenómeno de «BCI illiteracy»: si la mitad de los sujetos rinden cerca
+    del azar y unos pocos llegan a 0.90, el Gini es alto.
+
+    Usa la fórmula clásica basada en la curva de Lorenz.
+    """
+    arr = np.asarray([v for v in values if v is not None and not np.isnan(v)], dtype=float)
+    if arr.size < 2:
+        return None
+    arr = np.sort(arr)
+    n = arr.size
+    index = np.arange(1, n + 1)
+    return float((2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr)))
+
+
+def _itr_for_acc(acc: float | None, n_classes: int, trial_time_s: float) -> float | None:
+    """ITR (bits/min) para un solo valor de accuracy. None si acc no disponible."""
+    if acc is None or np.isnan(acc):
+        return None
+    return _itr_raw(acc, n_classes, trial_time_s)
 
 
 def _read_pooled_card(processed: Path, dataset: str) -> dict | None:
@@ -128,11 +156,16 @@ def _per_subject(processed: Path, dataset: str) -> tuple[list[dict], bool, bool]
             row["n_trials"] = int(r["n_trials"]) if "n_trials" in r else None
             row["csp_within_acc"] = _f(r.get("kfold_acc"))
             row["csp_within_kappa"] = _f(r.get("kfold_kappa"))
+            # Sensitivity/specificity (disponibles si el CSV se regeneró).
+            row["csp_within_sens"] = _f(r.get("kfold_sens"))
+            row["csp_within_spec"] = _f(r.get("kfold_spec"))
             if has_inter:
                 row["csp_inter_acc"] = _f(r.get("intersession_acc"))
                 row["csp_inter_kappa"] = _f(r.get("intersession_kappa"))
+                row["csp_inter_sens"] = _f(r.get("intersession_sens"))
+                row["csp_inter_spec"] = _f(r.get("intersession_spec"))
 
-    # 2) compare_methods_<id>.csv: matriz 2×2 por sujeto (acc; sin kappa).
+    # 2) compare_methods_<id>.csv: matriz 2×2 por sujeto.
     cmp = _find_csv(processed, "compare_methods", dataset)
     has_compare = cmp is not None
     if has_compare:
@@ -145,6 +178,11 @@ def _per_subject(processed: Path, dataset: str) -> tuple[list[dict], bool, bool]
             row["csp_cross_acc"] = _f(r.get("csp_cross"))
             row["eegnet_within_acc"] = _f(r.get("eegnet_within"))
             row["eegnet_cross_acc"] = _f(r.get("eegnet_cross"))
+            # Kappa para los 4 regímenes (disponible si CSV regenerado).
+            row.setdefault("csp_within_kappa", _f(r.get("csp_within_kappa")))
+            row["csp_cross_kappa"] = _f(r.get("csp_cross_kappa"))
+            row["eegnet_within_kappa"] = _f(r.get("eegnet_within_kappa"))
+            row["eegnet_cross_kappa"] = _f(r.get("eegnet_cross_kappa"))
 
     return [rows[k] for k in sorted(rows)], has_inter, has_compare
 
@@ -162,8 +200,17 @@ def _f(v) -> float | None:
 
 _METRICS = [
     "csp_within_acc", "csp_within_kappa",
+    "csp_within_sens", "csp_within_spec",
     "csp_inter_acc", "csp_inter_kappa",
-    "csp_cross_acc",
+    "csp_inter_sens", "csp_inter_spec",
+    "csp_cross_acc", "csp_cross_kappa",
+    "eegnet_within_acc", "eegnet_within_kappa",
+    "eegnet_cross_acc", "eegnet_cross_kappa",
+]
+
+# Métricas de accuracy (para ITR y Gini, que solo aplican a acc).
+_ACC_METRICS = [
+    "csp_within_acc", "csp_inter_acc", "csp_cross_acc",
     "eegnet_within_acc", "eegnet_cross_acc",
 ]
 
@@ -204,11 +251,48 @@ def dataset_results(dataset: str, meta: dict, processed: Path,
     else:
         status = "pending"
 
+    # --- ITR (bits/min) por método/escenario, usando streaming.window_s del YAML ---
+    # Lee el YAML del dataset para obtener el tiempo por decisión.
+    trial_time_s = 2.0  # default conservador
+    try:
+        from bci.config import load_config, BACKEND_ROOT
+        cfg_path = meta.get('config')
+        if cfg_path:
+            from pathlib import Path as _P
+            cp = _P(cfg_path)
+            if not cp.is_absolute():
+                cp = BACKEND_ROOT.parent / cp
+            cfg = load_config(cp)
+            trial_time_s = float(cfg.get('streaming', {}).get('window_s', 2.0))
+    except Exception:  # noqa: BLE001
+        pass
+
+    itr_matrix = {
+        "csp": {
+            "within": _itr_for_acc(cell("csp_within_acc"), n_classes, trial_time_s),
+            "cross": _itr_for_acc(cell("csp_cross_acc"), n_classes, trial_time_s),
+        },
+        "eegnet": {
+            "within": _itr_for_acc(cell("eegnet_within_acc"), n_classes, trial_time_s),
+            "cross": _itr_for_acc(cell("eegnet_cross_acc"), n_classes, trial_time_s),
+        },
+    }
+
+    # --- Kappa matrix (espejo de la accuracy matrix) ---
+    kappa_matrix = {
+        "csp": {"within": cell("csp_within_kappa"), "cross": cell("csp_cross_kappa")},
+        "eegnet": {"within": cell("eegnet_within_kappa"), "cross": cell("eegnet_cross_kappa")},
+    }
+
+    # --- Gini coefficient (dispersión inter-sujeto por método) ---
+    gini = {m: _gini([s.get(m) for s in subjects]) for m in _ACC_METRICS}
+    gini = {k: v for k, v in gini.items() if v is not None}
+
     return {
         "id": dataset,
         "label": meta.get("label", dataset),
         "sessions": int(meta.get("sessions", 1)),
-        "live": int(meta.get("sessions", 1)) >= 2,   # ≥2 sesiones ⇒ apto demo en vivo
+        "live": int(meta.get("sessions", 1)) >= 2,
         "fs": meta.get("fs"),
         "n_subjects_declared": meta.get("subjects"),
         "n_subjects_evaluated": len(subjects),
@@ -220,6 +304,10 @@ def dataset_results(dataset: str, meta: dict, processed: Path,
         "subjects": subjects,
         "summary": summary,
         "matrix": matrix,
+        "itr": itr_matrix,
+        "kappa_matrix": kappa_matrix,
+        "gini": gini,
+        "trial_time_s": trial_time_s,
         "significance": significance,
         "pooled": _read_pooled_card(processed, dataset),
     }
@@ -262,6 +350,8 @@ def aggregate_methods(datasets: list[tuple[str, dict, Path, list[str] | None]]) 
             "live": r.get("live"),
             "n": r["n_subjects_evaluated"],
             "cells": cells,
+            "gini": r.get("gini"),
+            "itr": r.get("itr"),
         })
 
     summary = {m: _stats(pooled[m]) for m in _METRICS}
@@ -276,6 +366,10 @@ def aggregate_methods(datasets: list[tuple[str, dict, Path, list[str] | None]]) 
         "eegnet": {"within": cell("eegnet_within_acc"), "cross": cell("eegnet_cross_acc")},
     }
 
+    # Gini global (pooled de todos los sujetos por método).
+    gini = {m: _gini(pooled[m]) for m in _ACC_METRICS}
+    gini = {k: v for k, v in gini.items() if v is not None}
+
     significance = {}
     w = _wilcoxon(pooled["csp_within_acc"], pooled["eegnet_within_acc"])
     c = _wilcoxon(pooled["csp_cross_acc"], pooled["eegnet_cross_acc"])
@@ -284,6 +378,7 @@ def aggregate_methods(datasets: list[tuple[str, dict, Path, list[str] | None]]) 
     return {
         "matrix": matrix,
         "summary": summary,
+        "gini": gini,
         "significance": significance,
         "per_dataset": per_dataset,
         "n_datasets": sum(1 for d in per_dataset if d["n"] > 0),

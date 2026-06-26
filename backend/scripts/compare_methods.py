@@ -20,7 +20,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, cohen_kappa_score
 from sklearn.model_selection import StratifiedKFold
 
 from bci.config import load_config, resolve_path
@@ -67,31 +67,50 @@ def main() -> None:
         # --- within-subject (k-fold) ---
         skf = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=42)
         csp_w, eeg_w = [], []
+        csp_wk, eeg_wk = [], []
         for tr, te in skf.split(Xs, ys):
             pipe = MotorImageryPipeline(cfg, fs=fs).fit(Xs[tr], ys[tr])
-            csp_w.append(accuracy_score(ys[te], pipe.predict(Xs[te])))
+            csp_pred = pipe.predict(Xs[te])
+            csp_w.append(accuracy_score(ys[te], csp_pred))
+            csp_wk.append(cohen_kappa_score(ys[te], csp_pred))
             clf = new_eeg().fit(Xcs[tr], ys[tr])
-            eeg_w.append(accuracy_score(ys[te], clf.predict(Xcs[te])))
+            eeg_pred = clf.predict(Xcs[te])
+            eeg_w.append(accuracy_score(ys[te], eeg_pred))
+            eeg_wk.append(cohen_kappa_score(ys[te], eeg_pred))
 
         # --- cross-subject (LOSO: entrenar con los demás, evaluar en s) ---
         other = subj != s
         pipe = MotorImageryPipeline(cfg, fs=fs).fit(X[other], y[other])
-        csp_c = accuracy_score(ys, pipe.predict(Xs))
+        csp_c_pred = pipe.predict(Xs)
+        csp_c = accuracy_score(ys, csp_c_pred)
+        csp_ck = cohen_kappa_score(ys, csp_c_pred)
         clf = new_eeg().fit(Xc[other], y[other])
-        eeg_c = accuracy_score(ys, clf.predict(Xcs))
+        eeg_c_pred = clf.predict(Xcs)
+        eeg_c = accuracy_score(ys, eeg_c_pred)
+        eeg_ck = cohen_kappa_score(ys, eeg_c_pred)
 
         row = {"subject": s,
-               "csp_within": float(np.mean(csp_w)), "eegnet_within": float(np.mean(eeg_w)),
-               "csp_cross": float(csp_c), "eegnet_cross": float(eeg_c)}
+               "csp_within": float(np.mean(csp_w)),
+               "csp_within_kappa": float(np.mean(csp_wk)),
+               "eegnet_within": float(np.mean(eeg_w)),
+               "eegnet_within_kappa": float(np.mean(eeg_wk)),
+               "csp_cross": float(csp_c),
+               "csp_cross_kappa": float(csp_ck),
+               "eegnet_cross": float(eeg_c),
+               "eegnet_cross_kappa": float(eeg_ck)}
         rows.append(row)
-        print(f"  sujeto {s:>2}: CSP within={row['csp_within']:.3f} cross={row['csp_cross']:.3f}  |  "
-              f"EEGNet within={row['eegnet_within']:.3f} cross={row['eegnet_cross']:.3f}")
+        print(f"  sujeto {s:>2}: CSP within={row['csp_within']:.3f}(κ={row['csp_within_kappa']:.3f}) "
+              f"cross={row['csp_cross']:.3f}(κ={row['csp_cross_kappa']:.3f})  |  "
+              f"EEGNet within={row['eegnet_within']:.3f}(κ={row['eegnet_within_kappa']:.3f}) "
+              f"cross={row['eegnet_cross']:.3f}(κ={row['eegnet_cross_kappa']:.3f})")
 
     df = pd.DataFrame(rows)
     print("\n=== Matriz 2×2 (media sobre sujetos) ===")
-    print("                within-subject    cross-subject (LOSO)")
-    print(f"  CSP+LDA :        {df['csp_within'].mean():.3f}             {df['csp_cross'].mean():.3f}")
-    print(f"  EEGNet  :        {df['eegnet_within'].mean():.3f}             {df['eegnet_cross'].mean():.3f}")
+    print("              within-subject (acc/κ)    cross-subject (acc/κ)")
+    print(f"  CSP+LDA :     {df['csp_within'].mean():.3f}/{df['csp_within_kappa'].mean():.3f}"
+          f"             {df['csp_cross'].mean():.3f}/{df['csp_cross_kappa'].mean():.3f}")
+    print(f"  EEGNet  :     {df['eegnet_within'].mean():.3f}/{df['eegnet_within_kappa'].mean():.3f}"
+          f"             {df['eegnet_cross'].mean():.3f}/{df['eegnet_cross_kappa'].mean():.3f}")
 
     out = resolve_path(cfg["paths"]["processed"]) / f"compare_methods_{dataset}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
