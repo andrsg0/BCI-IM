@@ -74,7 +74,15 @@ function loadActive(): string[] {
 }
 
 export default function Dashboard() {
-  const { dataset, subject, channel, playing, clearToken } = useStore()
+  // Selectores por campo (NO `useStore()` completo): así Dashboard solo re-renderiza
+  // cuando cambia algo que de verdad usa, y NO en cada frame por `setProgress`/`setLatency`/
+  // `addLog`. Junto con el `value` memoizado del contexto, evita re-renders en cascada de
+  // todos los paneles ~10 veces/s (que era lo que destapaba el bug de las gráficas vacías).
+  const dataset = useStore((s) => s.dataset)
+  const subject = useStore((s) => s.subject)
+  const channel = useStore((s) => s.channel)
+  const playing = useStore((s) => s.playing)
+  const clearToken = useStore((s) => s.clearToken)
   const fs = DATASETS[dataset].fs
 
   // ---- selección de paneles activos (persistida) ----
@@ -119,6 +127,10 @@ export default function Dashboard() {
     return () => ws.close()
   }, [playing, dataset, subject, channel])
   const resetKey = `${clearToken}-${dataset}-${subject}-${channel}`
+  // Valor del contexto MEMOIZADO: si lo creáramos inline (`value={{...}}`) sería un objeto
+  // nuevo en cada render y re-renderizaría TODOS los paneles consumidores aunque nada
+  // relevante cambie. Solo cambia cuando cambia subscribe/fs/resetKey.
+  const liveValue = useMemo(() => ({ subscribe, fs, resetKey }), [subscribe, fs, resetKey])
 
   // Publicar el progreso de la señal finita (pasada sobre los held-out) al panel lateral.
   useEffect(() => subscribe((m) => {
@@ -135,16 +147,18 @@ export default function Dashboard() {
       help={HELP}
       world="online"
     >
-      <LiveCtx.Provider value={{ subscribe, fs, resetKey }}>
+      <LiveCtx.Provider value={liveValue}>
         <GridBoard
           widgets={widgets}
           storageKey="dashboardLayout-v5"
           toolbar={
             <div className="flex items-center gap-2">
               <WidgetPicker available={available} onAdd={addWidget} />
-              <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${playing ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                <Radio size={13} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido — pulsa Play'}
-              </span>
+              {playing && (
+                <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-600">
+                  <Radio size={13} className="animate-pulse" /> EN VIVO
+                </span>
+              )}
             </div>
           }
         />
@@ -190,8 +204,8 @@ function WidgetPicker({ available, onAdd }: { available: CatalogEntry[]; onAdd: 
               >
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   {c.title}
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${c.live ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500'}`}>
-                    {c.live ? 'en vivo' : 'estático'}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${c.live ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                    {c.live ? 'en vivo' : 'modelo'}
                   </span>
                 </span>
                 <span className="text-xs text-slate-400">{c.desc}</span>
@@ -206,6 +220,14 @@ function WidgetPicker({ available, onAdd }: { available: CatalogEntry[]; onAdd: 
 
 // ---- Widgets en vivo ----
 const axis = (label: string) => ({ label, labelSize: 30, stroke: '#94a3b8', grid: { stroke: '#eef2f7', width: 1 }, font: '11px Geist Variable' })
+
+// Datos iniciales VACÍOS con referencia ESTABLE (a nivel de módulo). Imprescindible:
+// estos charts se rellenan imperativamente (onCreate + setData) y el padre re-renderiza
+// en cada frame (el progreso actualiza el store). Si pasáramos un literal `[[], []]`
+// nuevo en cada render, el efecto `data` de UPlotChart re-aplicaría datos vacíos y
+// BORRARÍA la gráfica en cada frame. Con una constante estable, ese efecto no se dispara.
+const EMPTY2: uPlot.AlignedData = [[], []]
+const EMPTY3: uPlot.AlignedData = [[], [], []]
 
 function SignalTrace({ kind }: { kind: 'raw' | 'filt' }) {
   const { subscribe, fs, resetKey } = useLive()
@@ -229,7 +251,7 @@ function SignalTrace({ kind }: { kind: 'raw' | 'filt' }) {
     axes: [axis('Tiempo (s)'), axis('µV')],
     series: [{}, { stroke: kind === 'raw' ? STAGE_COLORS.raw : STAGE_COLORS.filt, width: 1.2 }],
   }), [kind])
-  return <FillChart data={[[], []]} options={opts} onCreate={(x) => (u.current = x)} />
+  return <FillChart data={EMPTY2} options={opts} onCreate={(x) => (u.current = x)} />
 }
 
 function ConfidenceTrace() {
@@ -250,7 +272,7 @@ function ConfidenceTrace() {
     axes: [axis('Tiempo (s)'), axis('probabilidad')],
     series: [{}, { stroke: CLASS_COLORS[0], width: 1.6 }, { stroke: CLASS_COLORS[1], width: 1.6 }],
   }), [])
-  return <FillChart data={[[], [], []]} options={opts} onCreate={(x) => (u.current = x)} />
+  return <FillChart data={EMPTY3} options={opts} onCreate={(x) => (u.current = x)} />
 }
 
 function DecisionSummary() {
@@ -413,7 +435,7 @@ function DiscTrace() {
     axes: [axis('Tiempo (s)'), axis('proyección')],
     series: [{}, { stroke: STAGE_COLORS.disc, width: 1.6 }],
   }), [])
-  return <FillChart data={[[], []]} options={opts} onCreate={(x) => (u.current = x)} />
+  return <FillChart data={EMPTY2} options={opts} onCreate={(x) => (u.current = x)} />
 }
 
 // ---- Matriz de confusión en vivo (voto suave por trial) ----
