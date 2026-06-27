@@ -636,6 +636,12 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
         alo = (win['tmin_rel'] + win_s / 2) if win else 0.0
         ahi = (win['tmax_rel'] + win_s / 2) if win else 1e9
 
+        # La señal de la demo es FINITA: cada pasada recorre los trials reservados una
+        # vez (n_demo trials × trial_s segundos) y luego repite. Mandamos la posición en
+        # la tanda (demo_i/demo_n) y la duración de trial para una barra de progreso.
+        trial_s = data.X.shape[2] / fs
+        n_demo = len(idx_demo)
+
         # Reproduce SOLO los trials reservados (held-out) en bucle.
         j = 0
         while True:
@@ -650,6 +656,8 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
                     # de la ventana, para diferenciarlas en la sección En vivo.
                     'feat': r.get('feat'), 'disc': r.get('disc'),
                     'ref_ch': ref_ch, 'alo': alo, 'ahi': ahi,
+                    # Progreso de la señal finita (pasada actual sobre los held-out).
+                    'demo_i': j, 'demo_n': n_demo, 'trial_s': trial_s,
                 })
                 await asyncio.sleep(step)
             j = (j + 1) % len(idx_demo)

@@ -244,11 +244,15 @@ esfera/scalp, con heatmap cortical en GPU.
       `components/layout/Sidebar.tsx`, `pages/SignalLab.tsx`.
       Nota: en `LiveStream` la transmisión corre en bucle en el servidor (no "termina" en
       cliente), así que ahí no aplica hasta el loader continuo (Plan B).
-- [x] **Indicador de duración — HECHO (global).** Barra de progreso + `transcurrido / total s`
-      en el **panel lateral** (sección Reproducción), visible desde cualquier sección; la página
-      activa publica su progreso al store (`elapsedSec`/`totalSec`) y lo limpia al salir.
-      **Solo informativo** (el programa no lo usa). Hoy lo alimenta el Laboratorio; en
-      Clasificación se hará con el loader continuo (Plan B), donde la duración es desconocida.
+- [x] **Indicador de duración — HECHO y AHORA SÍ GLOBAL (2026-06-26).** Barra de progreso +
+      `transcurrido / total s` en el **panel lateral** (sección Reproducción); la página activa
+      publica su progreso al store (`elapsedSec`/`totalSec`) y lo limpia al salir. **Solo
+      informativo.** Ya no es exclusivo del Laboratorio: las páginas de demo (Clasificación,
+      Cerebro 3D, Dashboard) transmiten los held-out **en bucle**, pero **cada pasada es finita**;
+      el WS manda `demo_i`/`demo_n`/`trial_s` y `lib/progress.ts` (`progressFromFrame`) reconstruye
+      la barra (se llena por pasada y se reinicia al repetir). Sin necesidad del loader continuo
+      del Plan B. También se **eliminó el selector de Canal** del panel lateral (no aportaba: el
+      Laboratorio tiene selector por gráfico y las demás páginas en vivo no usan `channel`).
 - [ ] **Etiquetado de sujetos/datasets** en el panel lateral sin exponer el nombre crudo
       del dataset. Refs: `lib/datasets.ts`, `components/layout/Sidebar.tsx`, `REGISTRY` en
       `server/app.py`.

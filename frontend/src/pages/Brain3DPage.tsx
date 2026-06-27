@@ -7,6 +7,7 @@ import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { divergingColor } from '../lib/color'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
+import { progressFromFrame, type ProgressFrame } from '../lib/progress'
 
 interface PosResp { channels: string[]; pos3d: Pos3D }
 interface Msg { pred: string; probs: Record<string, number>; power: number[] }
@@ -103,7 +104,10 @@ export default function Brain3DPage() {
       .catch(() => setPos(null))
   }, [dataset, subject])
 
-  useEffect(() => { hist.current = []; base.current = []; setValues((v) => v.map(() => 0)) }, [clearToken])
+  useEffect(() => { hist.current = []; base.current = []; setValues((v) => v.map(() => 0)); useStore.getState().resetProgress() }, [clearToken])
+
+  // Al salir de la página, ocultar la barra de progreso del panel lateral.
+  useEffect(() => () => useStore.getState().resetProgress(), [])
 
   // patrón espacial del modelo (CSP) para la vista "Modelo (CSP)"
   useEffect(() => {
@@ -143,6 +147,8 @@ export default function Brain3DPage() {
     if (!playing || !pos) return
     const ws = openStream(`/stream?dataset=${dataset}&subject=${subject}`, (d) => {
       const m = d as Msg
+      const prog = progressFromFrame(d as ProgressFrame)
+      if (prog) useStore.getState().setProgress(prog[0], prog[1])
       if (!m.power) return
       let target: number[]
       if (modeRef.current === 'inst') {

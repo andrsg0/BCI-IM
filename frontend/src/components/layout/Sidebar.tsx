@@ -12,8 +12,8 @@ const ACCENT_PRESETS = ['#2563eb', '#0891b2', '#7c3aed', '#059669', '#e11d48', '
 
 export function Sidebar() {
   const {
-    dataset, subject, channel, playing, loop, ended, elapsedSec, totalSec, status, latencyMs, logs, primaryColor,
-    setDataset, setSubject, setChannel, togglePlay, toggleLoop, clearViews, setPrimaryColor, setPlaying,
+    dataset, subject, playing, loop, ended, elapsedSec, totalSec, status, latencyMs, logs, primaryColor,
+    setDataset, setSubject, togglePlay, toggleLoop, clearViews, setPrimaryColor, setPlaying,
   } = useStore()
   const info = DATASETS[dataset]
   const [showSettings, setShowSettings] = useState(false)
@@ -54,29 +54,17 @@ export function Sidebar() {
           )}
           <p className="text-[11px] text-slate-400">Solo datasets aptos para la demo en vivo (≥2 sesiones).</p>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-slate-500">Sujeto</label>
-              <select
-                value={subject}
-                onChange={(e) => setSubject(Number(e.target.value))}
-                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
-              >
-                {Array.from({ length: info.subjects }, (_, i) => i + 1).map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500">Canal</label>
-              <select
-                value={channel}
-                onChange={(e) => setChannel(e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
-              >
-                {info.channels.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs text-slate-500">Sujeto</label>
+            <select
+              value={subject}
+              onChange={(e) => setSubject(Number(e.target.value))}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            >
+              {Array.from({ length: info.subjects }, (_, i) => i + 1).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
         </section>
 

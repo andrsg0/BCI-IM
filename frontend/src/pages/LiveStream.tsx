@@ -9,6 +9,7 @@ import { CSPSpaceLive, LDAAxisLive, type CSPHandle, type LDAHandle } from '../co
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
+import { progressFromFrame, type ProgressFrame } from '../lib/progress'
 
 interface Msg {
   trial: number; 'true': string; t: number; pred: string; probs: Record<string, number>
@@ -133,7 +134,11 @@ export default function LiveStream() {
     chartU.current?.setData(EMPTY)
     filtU.current?.setData(EMPTY2)
     cspRef.current?.reset(); ldaRef.current?.reset()
+    useStore.getState().resetProgress()
   }, [clearToken, dataset, subject, method])
+
+  // Al salir de la página, ocultar la barra de progreso del panel lateral.
+  useEffect(() => () => useStore.getState().resetProgress(), [])
 
   // conexión al WebSocket: solo mientras "playing"
   useEffect(() => {
@@ -144,6 +149,8 @@ export default function LiveStream() {
       const m = d as Msg
       // El servidor manda {error} si el modelo (p. ej. un cross) no está entrenado.
       if (m.error) { setStreamError(m.error); addLog(`Stream: ${m.error}`); return }
+      const prog = progressFromFrame(d as ProgressFrame)
+      if (prog) useStore.getState().setProgress(prog[0], prog[1])
       setClasses((c) => (c.length ? c : Object.keys(m.probs)))
       const cls = Object.keys(m.probs)
       const h = hist.current

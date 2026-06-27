@@ -12,6 +12,7 @@ import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
 import { CLASS_COLORS, classColor, STAGE_COLORS, OUTCOME_COLORS, divergingColor } from '../lib/color'
+import { progressFromFrame } from '../lib/progress'
 
 const HELP: HelpContent = {
   pipeline: 'Un panel libre que armas tú mismo',
@@ -27,6 +28,7 @@ const HELP: HelpContent = {
 interface LiveMsg {
   trial: number; 'true': string; pred: string; probs: Record<string, number>
   raw?: number[]; filt?: number[]; power?: number[]; disc?: number; alo?: number; ahi?: number; t: number
+  demo_i?: number; demo_n?: number; trial_s?: number
 }
 const LiveCtx = createContext<{ subscribe: (fn: (m: LiveMsg) => void) => () => void; fs: number; resetKey: string } | null>(null)
 const useLive = () => {
@@ -117,6 +119,14 @@ export default function Dashboard() {
     return () => ws.close()
   }, [playing, dataset, subject, channel])
   const resetKey = `${clearToken}-${dataset}-${subject}-${channel}`
+
+  // Publicar el progreso de la señal finita (pasada sobre los held-out) al panel lateral.
+  useEffect(() => subscribe((m) => {
+    const prog = progressFromFrame(m)
+    if (prog) useStore.getState().setProgress(prog[0], prog[1])
+  }), [subscribe])
+  useEffect(() => { useStore.getState().resetProgress() }, [resetKey])
+  useEffect(() => () => useStore.getState().resetProgress(), [])
 
   return (
     <PageShell
