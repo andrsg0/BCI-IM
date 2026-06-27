@@ -3,19 +3,7 @@ import {
   Activity, ArrowRight, BarChart3, Brain, Network, Radio, Scale,
   CheckCircle2, Loader, Circle, LayoutDashboard, BookOpen,
 } from 'lucide-react'
-import { HelpButton, type HelpContent } from '../components/HelpButton'
 import { DATASET_LIST } from '../lib/datasets'
-
-const HELP: HelpContent = {
-  pipeline: 'Visión general del proyecto',
-  intro: 'Esta aplicación demuestra una Interfaz Cerebro-Computadora (BCI) para clasificar imaginación motora, concebida como aplicación práctica de la teoría de sistemas lineales e invariantes en el tiempo (LTI). La idea central es que cada etapa del procesamiento —el filtrado temporal, el filtrado espacial y la clasificación— es una operación lineal, y por tanto puede analizarse con las herramientas de la asignatura.',
-  points: [
-    { label: 'El diagrama del pipeline', desc: 'Resume el recorrido de la señal: adquisición del EEG, filtro FIR (banda µ/β), filtrado espacial CSP y clasificación. Cada bloque es una operación lineal y es interactivo: al pulsarlo se accede a la sección donde se explora en detalle.' },
-    { label: 'Cómo navegar', desc: 'El menú superior ordena las secciones siguiendo el recorrido natural de la teoría a la práctica. El panel lateral funciona como control maestro: permite elegir el conjunto de datos, el sujeto y el canal, y reproducir la señal.' },
-    { label: 'Las métricas', desc: 'Muestran la precisión media obtenida en cada conjunto de datos mediante validación cruzada, como referencia del rendimiento alcanzado por el sistema.' },
-  ],
-  terms: ['Sistema LTI', 'Convolución', 'FIR', 'CSP', 'Imaginación motora'],
-}
 
 // Pilares del proyecto: el qué, el cómo y la comparativa.
 const PILLARS = [
@@ -92,22 +80,20 @@ export default function Home() {
     <div className="mx-auto max-w-7xl space-y-12">
       {/* 1 · Hero ------------------------------------------------------------ */}
       <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 px-8 py-14 shadow-card sm:px-12 sm:py-16">
-        <div className="absolute right-5 top-5">
-          <HelpButton title="Inicio" help={HELP} />
-        </div>
         <div className="pointer-events-none absolute -right-10 -top-10 opacity-10">
           <Brain size={220} className="text-white" />
         </div>
         <div className="relative max-w-3xl">
-          <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-indigo-200">
-            <Brain size={14} /> Interfaz Cerebro-Computadora · Imaginación Motora
-          </span>
-          <h1 className="mt-5 text-4xl font-extrabold leading-tight text-white sm:text-5xl">
-            Abriendo la Caja Negra de las Interfaces Cerebro-Computadora
+          <h1 className="text-5xl font-extrabold leading-tight tracking-tight text-white sm:text-6xl">
+            BCI<span className="text-indigo-400">·MI</span>
           </h1>
-          <p className="mt-5 text-lg italic leading-relaxed text-slate-300">
-            Un laboratorio interactivo para explorar el procesamiento de señales EEG: desde las
-            matemáticas lineales clásicas hasta el poder de las Redes Convolucionales.
+          <p className="mt-4 text-lg font-medium text-slate-200 sm:text-xl">
+            Interfaz Cerebro-Computadora para Imaginación Motora
+          </p>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-400">
+            Un laboratorio interactivo que abre la caja negra del EEG: del filtrado temporal (FIR)
+            al espacial (CSP) y la clasificación, conectando la teoría de sistemas lineales con las
+            redes convolucionales.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button
