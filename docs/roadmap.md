@@ -212,9 +212,15 @@ esfera/scalp, con heatmap cortical en GPU.
       devolver esos campos (`n_train`, `n_demo`, `kappa`, `trained_on`, `epochs`, `fir`,
       `n_temporal`, `csp_lda`); `train_eegnet_subject` guarda `epochs` en `extra`. Se eliminó el
       "CSP+LDA: 0.72 / 0.74" **hardcodeado** (no era un valor medido) por la cifra real del modelo.
-- [ ] **Página de comparación estadística.** El estadístico que mencionó el ingeniero
-      ("k² o algo así") es **κ — kappa de Cohen** (ya se calcula y guarda en `ModelCard.kappa`).
-      Mostrar comparación accuracy vs kappa entre sujetos/datasets/métodos (CSP+LDA vs EEGNet).
+- [x] **Comparación estadística accuracy vs κ — HECHO (2026-06-26).** El estadístico que mencionó
+      el ingeniero ("k² o algo así") es **κ — kappa de Cohen** (ya se calcula y guarda en
+      `ModelCard.kappa`). Implementado como panel `AccuracyKappaScatter` en la página Resultados
+      (`pages/Results.tsx`): scatter accuracy (x) vs κ (y) con un punto por sujeto y los 4 regímenes
+      (CSP+LDA / EEGNet × within / cross), recta de referencia **κ = 2·acc − 1** (relación esperada
+      con clases balanceadas; puntos por debajo = accuracy inflada por desbalance/azar) y línea κ=0.
+      Se integró como panel (no página aparte) para reusar los datos por-sujeto que ya servía
+      `/api/results`. κ además ya se mostraba en la matriz 2×2, la tabla por sujeto y la matriz
+      agregada.
 
 ## En vivo
 

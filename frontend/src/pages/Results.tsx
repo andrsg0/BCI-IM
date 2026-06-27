@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, Cell,
+  ReferenceLine, Cell, ScatterChart, Scatter, Legend, ZAxis,
 } from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
@@ -443,6 +443,102 @@ function SubjectTable({ r, selected, onPick }: {
 // ---------------------------------------------------------------------------
 // Ficha de detalle de un sujeto.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Comparación accuracy vs κ (kappa de Cohen).
+// κ corrige el acierto por azar: con 2 clases BALANCEADAS, κ ≈ 2·acc − 1. Un punto
+// muy por debajo de esa recta delata accuracy "inflada" por desbalance de clases o
+// acuerdo casual, no por una decisión realmente informada. Sirve para comparar los
+// 4 regímenes (CSP+LDA / EEGNet × within / cross) sujeto a sujeto en un solo vistazo.
+// ---------------------------------------------------------------------------
+const KAPPA_SERIES: {
+  accKey: keyof SubjectRow; kapKey: keyof SubjectRow; name: string; color: string
+}[] = [
+  { accKey: 'csp_within_acc', kapKey: 'csp_within_kappa', name: 'CSP+LDA within', color: '#0284c7' },
+  { accKey: 'csp_cross_acc', kapKey: 'csp_cross_kappa', name: 'CSP+LDA cross', color: '#7dd3fc' },
+  { accKey: 'eegnet_within_acc', kapKey: 'eegnet_within_kappa', name: 'EEGNet within', color: '#7c3aed' },
+  { accKey: 'eegnet_cross_acc', kapKey: 'eegnet_cross_kappa', name: 'EEGNet cross', color: '#c4b5fd' },
+]
+
+interface KappaPoint { acc: number; kappa: number; subject: number; series: string }
+
+function KappaTooltip({ active, payload }: {
+  active?: boolean; payload?: { payload: KappaPoint }[]
+}) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm">
+      <div className="font-medium text-slate-700">{p.series} · S{p.subject}</div>
+      <div className="text-slate-500">acc {pct(p.acc)} · κ {kappa(p.kappa)}</div>
+    </div>
+  )
+}
+
+function AccuracyKappaScatter({ r }: { r: DatasetResult }) {
+  const subjects = r.subjects ?? []
+  const series = KAPPA_SERIES.map((s) => ({
+    ...s,
+    data: subjects
+      .filter((row) => row[s.accKey] != null && row[s.kapKey] != null)
+      .map((row): KappaPoint => ({
+        acc: row[s.accKey] as number,
+        kappa: row[s.kapKey] as number,
+        subject: row.subject,
+        series: s.name,
+      })),
+  })).filter((s) => s.data.length > 0)
+
+  if (series.length === 0) return null
+
+  const allPts = series.flatMap((s) => s.data)
+  const minAcc = Math.min(0.5, ...allPts.map((p) => p.acc))
+  const minKap = Math.min(0, ...allPts.map((p) => p.kappa))
+
+  return (
+    <Card title="Accuracy vs κ (kappa de Cohen)">
+      <div className="h-72">
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart margin={{ top: 8, right: 12, bottom: 24, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis
+              type="number" dataKey="acc" name="accuracy"
+              domain={[Math.floor(minAcc * 20) / 20, 1]}
+              tickFormatter={(v) => `${Math.round(v * 100)}%`}
+              tick={{ fontSize: 11 }}
+              label={{ value: 'accuracy', position: 'insideBottom', offset: -12, fontSize: 11, fill: '#64748b' }}
+            />
+            <YAxis
+              type="number" dataKey="kappa" name="κ"
+              domain={[Math.min(0, Math.floor(minKap * 10) / 10), 1]}
+              tick={{ fontSize: 11 }}
+              label={{ value: 'κ', angle: -90, position: 'insideLeft', fontSize: 11, fill: '#64748b' }}
+            />
+            <ZAxis range={[55, 55]} />
+            {/* Recta de balance perfecto: κ = 2·acc − 1 (acc=0.5⇒κ=0, acc=1⇒κ=1). */}
+            <ReferenceLine
+              segment={[{ x: 0.5, y: 0 }, { x: 1, y: 1 }]}
+              stroke="#94a3b8" strokeDasharray="5 4"
+              ifOverflow="extendDomain"
+            />
+            {/* κ = 0: acuerdo no mejor que el azar. */}
+            <ReferenceLine y={0} stroke="#cbd5e1" />
+            <Tooltip content={<KappaTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+            <Legend wrapperStyle={{ fontSize: 11 }} iconSize={9} />
+            {series.map((s) => (
+              <Scatter key={s.name} name={s.name} data={s.data} fill={s.color} />
+            ))}
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        Cada punto es un sujeto. La recta discontinua es <span className="font-mono">κ = 2·acc − 1</span>,
+        la relación esperada con clases balanceadas: puntos por debajo señalan accuracy «inflada»
+        por desbalance o acuerdo casual; cuanto más alto y a la derecha, mejor.
+      </p>
+    </Card>
+  )
+}
+
 function SubjectDetail({ r, subject }: { r: DatasetResult; subject: number }) {
   const s = (r.subjects ?? []).find((x) => x.subject === subject)
   if (!s) return null
@@ -610,6 +706,8 @@ export default function Results() {
                   <p className="mt-2 text-xs text-slate-400">Clic en una barra o fila para ver la ficha del sujeto.</p>
                 </Card>
               )}
+
+              {(detail.subjects?.length ?? 0) > 0 && <AccuracyKappaScatter r={detail} />}
 
               {subject != null && <SubjectDetail r={detail} subject={subject} />}
 
