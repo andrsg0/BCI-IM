@@ -30,7 +30,8 @@ from bci.dsp.fir_filters import design_bandpass_fir
 from bci.dsp.frequency_response import frequency_response
 from bci.pipeline.offline import MotorImageryPipeline
 from bci.pipeline.training import (
-    load_card, load_model, model_paths, save_model, train_eegnet_subject, train_subject,
+    _eegnet_features, load_card, load_model, model_paths, save_model,
+    train_eegnet_subject, train_subject,
 )
 from bci.server import payloads as pl
 from bci.server import results as results_mod
@@ -499,6 +500,53 @@ def model(dataset: str, subject: int = 1, method: str = 'csp_lda'):
     """Ficha del modelo ENTRENADO (mundo offline): con qué se entrenó, qué se
     reservó para la demo y la precisión honesta sobre ese held-out."""
     return _ensure_model(dataset, subject, method)[1]
+
+
+@app.get('/api/eval')
+def eval_model(dataset: str, subject: int = 1, method: str = 'csp_lda'):
+    """Evalúa un modelo YA ENTRENADO sobre su partición held-out y devuelve la
+    matriz de confusión + accuracy + κ honestos para CUALQUIERA de los 4 regímenes
+    (CSP+LDA / EEGNet × within / cross).
+
+    A diferencia de /api/lda (cableado a csp_lda y centrado en la frontera 2D), esto
+    sirve a la página Benchmark, que compara los 4 regímenes de UN sujeto. No
+    reentrena ni recomputa payloads: carga el artefacto y predice sobre el held-out
+    con el MISMO preprocesamiento que usó cada régimen al entrenar (la pipeline aplica
+    su FIR+CSP internamente; EEGNet recibe la banda amplia recortada a la ventana)."""
+    from sklearn.metrics import cohen_kappa_score, confusion_matrix
+
+    if method not in VALID_METHODS:
+        raise HTTPException(status_code=400,
+                            detail=f"método '{method}' inválido; usa {sorted(VALID_METHODS)}")
+
+    model_obj, card = _ensure_model(dataset, subject, method)
+    _, idx_demo = _split_idx(dataset, subject, method)
+    data = _get_data(dataset, subject)
+    classes = sorted(set(map(str, data.y)))
+    y_true = np.asarray(list(map(str, np.asarray(data.y)[idx_demo])))
+
+    if method in ('csp_lda', 'csp_lda_cross'):
+        y_pred = np.asarray(list(map(str, model_obj.predict(data.X[idx_demo]))))
+    else:  # eegnet / eegnet_cross: banda amplia + recorte a la ventana activa
+        Xc, *_ = _eegnet_features(_config_for(dataset), data)
+        y_pred = np.asarray(list(map(str, model_obj.predict(Xc[idx_demo]))))
+
+    cm = confusion_matrix(y_true, y_pred, labels=classes).tolist()
+    acc = float(np.mean(y_pred == y_true)) if len(y_true) else 0.0
+    kappa = float(cohen_kappa_score(y_true, y_pred, labels=classes)) if len(y_true) else 0.0
+
+    spec = card.get('holdout') or {}
+    holdout_kind = ('cross-subject' if spec.get('by') == 'subject'
+                    else 'inter-sesión' if spec.get('by') == 'session'
+                    else 'hold-out 30% estratificado')
+
+    return {
+        'dataset': dataset, 'subject': subject, 'method': method,
+        'classes': classes,
+        'confusion': {'labels': classes, 'matrix': cm},
+        'accuracy': acc, 'kappa': kappa, 'n_eval': int(len(y_true)),
+        'holdout_kind': holdout_kind,
+    }
 
 
 @app.get('/api/train_config')
