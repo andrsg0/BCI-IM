@@ -8,6 +8,7 @@ import type { HelpContent } from '../components/HelpButton'
 import { GridBoard, type GridWidget } from '../components/GridBoard'
 import { FillChart } from '../components/charts/FillChart'
 import { Brain3D, type Pos3D } from '../components/Brain3D'
+import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
@@ -54,6 +55,7 @@ const CATALOG: CatalogEntry[] = [
   { i: 'disc', title: 'Discriminante LDA en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Proyección sobre el eje de decisión del LDA (signo = clase).', el: <DiscTrace /> },
   { i: 'confusion', title: 'Matriz de confusión en vivo', accent: 'metric', w: 4, h: 5, minW: 3, minH: 4, live: true, desc: 'Aciertos y confusiones acumulados por trial.', el: <ConfusionMatrix /> },
   { i: 'brain3d', title: 'Cerebro 3D (actividad µ/β)', accent: 'brain', w: 6, h: 6, minW: 4, minH: 5, live: true, desc: 'Cabeza 3D coloreada con la potencia µ/β (tendencia ERD).', el: <BrainWidget /> },
+  { i: 'puppet', title: 'Muñeco (movimiento real)', accent: 'signal', w: 4, h: 6, minW: 3, minH: 5, live: true, desc: 'Un muñeco que mueve el brazo según la etiqueta real del trial.', el: <PuppetWidget /> },
   { i: 'legend', title: 'Leyenda de colores', accent: 'neutral', w: 4, h: 4, minW: 3, minH: 3, live: false, desc: 'Qué significa cada color en los gráficos del tablero.', el: <ColorLegend /> },
   { i: 'info', title: 'Ficha del dataset', accent: 'neutral', w: 4, h: 4, minW: 3, minH: 3, live: false, desc: 'Resumen estático del dataset y sujeto seleccionados.', el: <DatasetInfoCard /> },
 ]
@@ -343,6 +345,35 @@ function PredictionLive() {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ---- Muñeco demostrativo: mueve el brazo según la ETIQUETA REAL del trial ----
+/** Mapea la etiqueta de clase a qué mano mueve el muñeco (con fallback por orden). */
+function handSideFromLabel(label: string | null | undefined, classes: string[]): HandSide {
+  if (!label) return null
+  const l = label.toLowerCase()
+  if (/left|izq/.test(l)) return 'left'
+  if (/right|der/.test(l)) return 'right'
+  const i = classes.indexOf(label)
+  return i === 0 ? 'left' : i === 1 ? 'right' : null
+}
+
+function PuppetWidget() {
+  const { subscribe, resetKey } = useLive()
+  const [m, setM] = useState<LiveMsg | null>(null)
+  useEffect(() => { setM(null) }, [resetKey])
+  useEffect(() => subscribe(setM), [subscribe])
+  if (!m) return <div className="flex h-full items-center justify-center text-center text-sm text-slate-300">Pulsa <strong className="mx-1">Play</strong> para iniciar</div>
+  const classes = Object.keys(m.probs)
+  const trueLabel = m['true'] ?? null
+  const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
+  const moving = active && trueLabel ? handSideFromLabel(trueLabel, classes) : null
+  const color = trueLabel ? classColor(classes, trueLabel) : '#64748b'
+  return (
+    <div className="h-full min-h-[240px]">
+      <HandPuppet moving={moving} label={trueLabel} active={active} color={color} />
     </div>
   )
 }

@@ -11,7 +11,6 @@ import { progressFromFrame, type ProgressFrame } from '../lib/progress'
 
 interface PosResp { channels: string[]; pos3d: Pos3D }
 interface Msg { pred: string; probs: Record<string, number>; power: number[] }
-interface CSPResp { channels: string[]; patterns: number[][]; eigenvalues: number[]; classes: string[] }
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
 
@@ -25,21 +24,6 @@ function elecInfo(ch: string): { motor: boolean; side: 'L' | 'R' | 'M' } {
   const motor = ['C', 'FC', 'CP', 'FCC', 'CCP'].includes(prefix)
   const side: 'L' | 'R' | 'M' = suf === 'z' ? 'M' : parseInt(suf, 10) % 2 === 1 ? 'L' : 'R'
   return { motor, side }
-}
-
-// Valores = patrón espacial CSP del componente que más favorece la clase predicha
-// (λ alto → clase 0; λ bajo → clase 1). Es lo que el MODELO mira, no la señal en vivo.
-function cspPatternValues(csp: CSPResp, pred: string, channels: string[]): number[] {
-  const favorsClass0 = pred === csp.classes[0]
-  let best = 0, bestLam = favorsClass0 ? -Infinity : Infinity
-  csp.eigenvalues.forEach((lam, i) => {
-    if (favorsClass0 ? lam > bestLam : lam < bestLam) { bestLam = lam; best = i }
-  })
-  const pat = csp.patterns[best] || []
-  return channels.map((ch) => {
-    const j = csp.channels.indexOf(ch)
-    return j >= 0 ? (pat[j] ?? 0) : 0
-  })
 }
 
 /** Barra divergente (azul − / rojo +) para comparar hemisferios. */
@@ -78,9 +62,7 @@ const HELP: HelpContent = {
 //            lateralización contralateral de la imaginación motora.
 //  - 'inst': desviación respecto a la media ESPACIAL del instante (todos los canales).
 //            Más cruda y nerviosa: cuánto destaca cada electrodo ahora mismo.
-//  - 'cspmodel': el patrón espacial FIJO del modelo (CSP) para la clase predicha.
-//                No es señal en vivo: muestra QUÉ mira el clasificador (cuadra con la predicción).
-type ColorMode = 'erd' | 'inst' | 'cspmodel'
+type ColorMode = 'erd' | 'inst'
 
 export default function Brain3DPage() {
   const { dataset, subject, playing, clearToken } = useStore()
@@ -88,7 +70,6 @@ export default function Brain3DPage() {
   const [values, setValues] = useState<number[]>([])
   const [last, setLast] = useState<Msg | null>(null)
   const [mode, setMode] = useState<ColorMode>('erd')
-  const [csp, setCsp] = useState<CSPResp | null>(null)
   const [focusMotor, setFocusMotor] = useState(false)
   const hist = useRef<number[][]>([])   // ventana reciente de valores (agregación temporal)
   const base = useRef<number[]>([])     // línea base lenta por canal (modo ERD)
@@ -108,21 +89,6 @@ export default function Brain3DPage() {
 
   // Al salir de la página, ocultar la barra de progreso del panel lateral.
   useEffect(() => () => useStore.getState().resetProgress(), [])
-
-  // patrón espacial del modelo (CSP) para la vista "Modelo (CSP)"
-  useEffect(() => {
-    setCsp(null)
-    getJSON<CSPResp>(`/csp?dataset=${dataset}&subject=${subject}`)
-      .then((r) => setCsp({ channels: r.channels, patterns: r.patterns, eigenvalues: r.eigenvalues, classes: r.classes }))
-      .catch(() => setCsp(null))
-  }, [dataset, subject])
-
-  // En modo "Modelo (CSP)" los valores NO vienen del stream: son el patrón fijo de la
-  // clase predicha (se actualiza al cambiar la predicción o el componente favorecido).
-  useEffect(() => {
-    if (mode !== 'cspmodel' || !csp || !pos) return
-    setValues(cspPatternValues(csp, last?.pred ?? csp.classes[0], pos.channels))
-  }, [mode, csp, pos, last])
 
   // Clasificación motora de cada canal → máscara para atenuar los no-motores (foco)
   // y para el cálculo de la barra de lateralización por hemisferio.
@@ -171,8 +137,7 @@ export default function Brain3DPage() {
         for (const f of h) s += f[i] ?? 0
         return s / h.length
       })
-      // En modo "Modelo (CSP)" los valores los fija el patrón del modelo, no el stream.
-      if (modeRef.current !== 'cspmodel') setValues(agg)   // BrainMesh normaliza por su máximo
+      setValues(agg)   // BrainMesh normaliza por su máximo
       setLast(m)
     })
     return () => ws.close()
@@ -184,11 +149,9 @@ export default function Brain3DPage() {
   }
 
   // Texto de la leyenda según el modo de coloreo activo.
-  const legend = mode === 'cspmodel'
-    ? { pos: 'peso +', neg: 'peso −', note: 'Patrón FIJO del modelo (CSP) para la clase predicha — no es señal en vivo: es lo que el clasificador mira.' }
-    : mode === 'erd'
-      ? { pos: 'más µ/β', neg: 'menos µ/β', note: 'Tendencia ~2,5 s (no cada frame). Azul = ERD → lado activo (opuesto a la mano).' }
-      : { pos: 'más µ/β', neg: 'menos µ/β', note: 'Instante crudo: cambia rápido en ambos lados a la vez.' }
+  const legend = mode === 'erd'
+    ? { pos: 'más µ/β', neg: 'menos µ/β', note: 'Tendencia ~2,5 s (no cada frame). Azul = ERD → lado activo (opuesto a la mano).' }
+    : { pos: 'más µ/β', neg: 'menos µ/β', note: 'Instante crudo: cambia rápido en ambos lados a la vez.' }
   const latScale = lat ? Math.max(Math.abs(lat.left), Math.abs(lat.right), 1e-6) : 1
 
   return (
@@ -221,15 +184,13 @@ export default function Brain3DPage() {
                 {/* Conmutador de vista + foco motor */}
                 <div className="absolute right-3 top-3 flex flex-col items-end gap-1">
                   <div className="flex gap-1 rounded-lg bg-white/85 p-1 text-xs shadow-sm backdrop-blur">
-                    {([['erd', 'ERD (lateralización)'], ['inst', 'Instantánea'], ['cspmodel', 'Modelo (CSP)']] as [ColorMode, string][]).map(([k, label]) => (
+                    {([['erd', 'ERD (lateralización)'], ['inst', 'Instantánea']] as [ColorMode, string][]).map(([k, label]) => (
                       <button
                         key={k}
                         onClick={() => setMode(k)}
                         title={k === 'erd'
                           ? 'Desviación de cada canal respecto a su línea base reciente (ERD): el descenso de potencia se ve azul.'
-                          : k === 'inst'
-                            ? 'Desviación respecto a la media espacial del instante: cuánto destaca cada electrodo ahora mismo.'
-                            : 'Patrón espacial fijo del modelo (CSP) para la clase predicha: lo que el clasificador realmente mira.'}
+                          : 'Desviación respecto a la media espacial del instante: cuánto destaca cada electrodo ahora mismo.'}
                         className={`rounded-md px-2 py-1 transition-colors ${mode === k ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'}`}
                       >
                         {label}
@@ -277,11 +238,9 @@ export default function Brain3DPage() {
                   <DivBar label="Izq" value={lat.left} scale={latScale} />
                   <DivBar label="Der" value={lat.right} scale={latScale} />
                   <p className="text-[11px] leading-snug text-slate-500">
-                    {mode === 'cspmodel'
-                      ? 'Peso espacial del modelo (CSP) sobre cada hemisferio motor para la clase predicha.'
-                      : mode === 'erd'
-                        ? 'Promedio µ/β (vs. base) de cada corteza motora. Azul = más caída (ERD) = lado más activo → la mano imaginada es la del lado contrario.'
-                        : 'Potencia µ/β relativa de cada corteza motora en el instante.'}
+                    {mode === 'erd'
+                      ? 'Promedio µ/β (vs. base) de cada corteza motora. Azul = más caída (ERD) = lado más activo → la mano imaginada es la del lado contrario.'
+                      : 'Potencia µ/β relativa de cada corteza motora en el instante.'}
                   </p>
                 </div>
               ) : <div className="text-sm text-slate-300">—</div>}
