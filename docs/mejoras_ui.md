@@ -173,19 +173,26 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 
 ## Demo en vivo
 
-- [ ] Renombrar título a "Benchmark".
-- [ ] Eliminar la sección "Benchmark de población (todos)".
-- [ ] Añadir la matriz de confusión.
-- [ ] Permitir ver también los resultados de cross, y de EEGNet (cross y within).
-- [ ] Eliminar la sección "lectura honesta" y, si no está ya, mover algo equivalente al
-  botón de explicación (`?`).
+- [x] Renombrar título a "Benchmark". → Título de página y etiqueta del nav (`/demo`)
+  ahora "Benchmark".
+- [x] Eliminar la sección "Benchmark de población (todos)". → Hecho vía `DatasetRolesNote`.
+- [x] Añadir la matriz de confusión. → Nuevo endpoint `/api/eval` (confusión + acc + κ por
+  régimen) + componente `ConfusionMatrix` en la página.
+- [x] Permitir ver también los resultados de cross, y de EEGNet (cross y within). → Selector
+  de los 4 regímenes (within/cross × CSP/EEGNet); cada uno se evalúa vía `/api/eval`.
+- [x] Eliminar la sección "lectura honesta" y, si no está ya, mover algo equivalente al
+  botón de explicación (`?`). → Tarjeta eliminada; el `?` ahora explica el benchmark por
+  sujeto (train vs held-out, within vs cross, matriz de confusión).
 - [ ] **(pendiente: evaluar qué más añadir)**.
 
 ---
 
 ## Cerebro 3D
 
-- [ ] Entender qué está pasando en esta sección y documentarlo. **(pendiente)**.
+- [x] Entender qué está pasando en esta sección y documentarlo. → Ya está documentado:
+  comentarios en `Brain3DPage.tsx` (3 modos: ERD / Instantánea / Modelo CSP), el `?` con 7
+  puntos didácticos y `docs/frontend-design.md` § "Cerebro 3D EN VIVO". Es una "cámara
+  térmica" de la potencia µ/β por electrodo en vivo, con foco motor y barra de lateralización.
 
 ---
 

@@ -45,7 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/lab', label: 'Laboratorio', icon: Activity },
       { path: '/live', label: 'Clasificación', icon: Radio },
-      { path: '/demo', label: 'Demo en vivo', icon: Gauge },
+      { path: '/demo', label: 'Benchmark', icon: Gauge },
       { path: '/brain', label: 'Cerebro 3D', icon: Brain },
     ],
   },
