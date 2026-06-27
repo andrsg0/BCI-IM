@@ -19,9 +19,10 @@ interface EEGNetResp {
 }
 interface FilterResp { freqs: number[]; magnitude: number[] }
 // lo mínimo que necesitamos del CSP clásico para comparar (subconjunto de CSPResp)
-interface CSPLike { channels: string[]; patterns: number[][]; eigenvalues: number[]; pos2d: Pos2D }
+interface CSPLike { channels: string[]; patterns: number[][]; eigenvalues: number[]; pos2d: Pos2D; classes: string[] }
 
 const PALETTE = ['#2563eb', '#e11d48', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
+const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']   // mismo código de color que CSP+LDA
 const MU_BETA = { low: 8, high: 30 }   // la banda que el método clásico impone a mano
 const FREQ_MAX = 45                    // foco en la zona relevante (Hz)
 
@@ -169,9 +170,9 @@ export function EEGNetModel({ dataset, subject, csp }: { dataset: string; subjec
       </div>
 
       {/* --- Arquitectura: el flujo end-to-end y su espejo con el pipeline clásico --- */}
-      <Widget title="Arquitectura de EEGNet — flujo de extremo a extremo" accent="brain">
+      <Widget title="El recorrido de la señal" accent="brain">
         <ArchitectureDiagram net={net} />
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
           EEGNet no tiene pasos separados como el método clásico: una sola red aprende todo de extremo a
           extremo. Aun así, cada bloque cumple el papel de una etapa de tu pipeline (la fila inferior marca
           el paralelismo): la convolución temporal ≈ tu <strong>FIR</strong>, la depthwise ≈ tu{' '}
@@ -183,6 +184,12 @@ export function EEGNetModel({ dataset, subject, csp }: { dataset: string; subjec
 
       {/* --- Comparación TEMPORAL: tu FIR vs el banco de filtros aprendido --- */}
       <Widget title="Filtro temporal — diseñado a mano vs aprendido" accent="fir">
+        <p className="mb-3 text-xs leading-relaxed text-slate-500">
+          Tu FIR es un pasa-banda limpio en µ/β (zona verde). Cada curva aprendida por EEGNet es la
+          respuesta en frecuencia de uno de sus filtros temporales. La pregunta clave: ¿sus picos caen
+          dentro de la zona verde? Si es así, la red <strong>redescubrió</strong> la banda que tú impusiste
+          por teoría.
+        </p>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <div className="mb-1 text-sm font-medium text-slate-600">Tu FIR µ/β (diseñado)</div>
@@ -193,44 +200,47 @@ export function EEGNetModel({ dataset, subject, csp }: { dataset: string; subjec
             <UPlotChart data={netData} options={netOptions} height={220} />
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-400">
-          Tu FIR es un pasa-banda limpio en µ/β. Cada curva de la derecha es un filtro que la red ajustó
-          sola (su |H(e^jω)|). La pregunta clave: ¿sus picos caen dentro de la zona verde? Si es así, la
-          red <strong>redescubrió</strong> la banda que tú impusiste por teoría.
-        </p>
       </Widget>
 
       {/* --- Comparación ESPACIAL: tus patrones CSP vs los filtros depthwise --- */}
       <Widget title="Filtro espacial — CSP vs depthwise aprendido" accent="csp">
+        <p className="mb-3 text-xs leading-relaxed text-slate-500">
+          El CSP combina los canales para maximizar la diferencia de energía entre clases; típicamente se
+          lateraliza sobre la corteza motora (C3/C4). La conv <em>depthwise</em> de EEGNet hace lo mismo,
+          pero aprendido por sí sola. ¿Alguno de sus filtros muestra esa misma lateralización?
+        </p>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <div className="mb-2 text-sm font-medium text-slate-600">Tus patrones CSP (entrenados)</div>
-            <div className="flex flex-wrap justify-around gap-2">
-              {csp ? csp.patterns.map((pat, i) => (
-                <div key={i} className="text-center">
-                  <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={120} />
-                  <div className="text-xs text-slate-500">comp {i} · <span className="font-mono">λ={csp.eigenvalues[i].toFixed(2)}</span></div>
-                </div>
-              )) : <div className="text-slate-300">—</div>}
+            <div className="flex flex-wrap content-start justify-around gap-2">
+              {csp ? csp.patterns.map((pat, i) => {
+                const fav = csp.eigenvalues[i] >= 0.5 ? 0 : 1
+                return (
+                  <div key={i} className="text-center">
+                    <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={110} />
+                    <div className="text-sm font-medium text-slate-700">comp {i}</div>
+                    <div className="text-xs text-slate-500">
+                      favorece <span style={{ color: CLASS_COLORS[fav] }}>{csp.classes[fav]}</span>
+                    </div>
+                    <div className="font-mono text-[11px] text-slate-400">λ = {csp.eigenvalues[i].toFixed(2)}</div>
+                  </div>
+                )
+              }) : <div className="text-slate-300">—</div>}
             </div>
           </div>
           <div>
             <div className="mb-2 text-sm font-medium text-slate-600">Filtros espaciales de EEGNet (aprendidos)</div>
-            <div className="flex flex-wrap justify-around gap-2">
+            <div className="flex flex-wrap content-start justify-around gap-2">
               {net.spatial.map((w, i) => (
                 <div key={i} className="text-center">
-                  <Topomap channels={net.channels} pos2d={net.pos2d} values={w} size={120} />
-                  <div className="text-xs text-slate-500">filtro {i}</div>
+                  <Topomap channels={net.channels} pos2d={net.pos2d} values={w} size={110} />
+                  <div className="text-sm font-medium text-slate-700">filtro {i}</div>
+                  <div className="text-xs text-slate-400">aprendido</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-        <p className="mt-2 text-xs text-slate-400">
-          El CSP combina los canales para maximizar la diferencia de varianza entre clases; típicamente
-          se lateraliza sobre la corteza motora (C3/C4). La conv <em>depthwise</em> de EEGNet hace lo
-          mismo, pero aprendido. ¿Alguno de sus filtros muestra esa misma lateralización?
-        </p>
       </Widget>
     </div>
   )

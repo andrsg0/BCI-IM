@@ -102,7 +102,18 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 - [x] Unificar el formato con el resto de la página. → Resuelto por el rewrite: se eligió la
   alternativa "sin widgets/canvas". Toda la sección "El Modelo" (CSP+LDA y EEGNet) usa el
   mismo formato de cajas en flujo cronológico.
-
+- [x] Mismo titulo para el pipeline que está en la seccion CSP+LDA → La caja de
+  arquitectura ahora se titula "El recorrido de la señal" (igual que en CSP+LDA).
+- [x] Poner una pequeña explicación en cada cuadrado tal y como en CSP + LDA → Cada
+  caja (recorrido, filtro temporal, filtro espacial) tiene su explicación concisa arriba.
+- [x] Cambiar de lugar en un grafico donde no se ocupe tanto espacio los patrones CSP y
+  hacer que se parezca más al grafico de CSP+LDA (texto en varias lineas, resaltado en
+  color segun el lado) → Patrones CSP más compactos (size 110) con caption multilínea
+  (comp N · favorece [clase coloreada] · λ), igual que en CSP+LDA.
+- [x] El estilo de EEGNet debe parecerse más a su contraparte de CSP+LDA en la explicacion
+  y posicion de los textos → Explicaciones movidas arriba de cada caja (text-slate-500,
+  leading-relaxed) y captions de topomapas alineados con CSP+LDA.
+- [ ] Ver información y graficos reelevantes para agregar **(pendiente: explorar)**.
 ---
 
 ## Resultados
