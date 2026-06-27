@@ -8,14 +8,22 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 
 ## Mejoras generales (aplican a todas las secciones)
 
-- [ ] Quitar el texto descriptivo que va debajo del título de cada sección y moverlo a
+- [x] Quitar el texto descriptivo que va debajo del título de cada sección y moverlo a
   la zona de explicación (icono `?`). Aprovechar para redactar mejor esa explicación,
-  una por una.
-- [ ] Quitar los textos explicativos sueltos de estos paneles (su contenido debería vivir
-  en la zona de explicación):
-  - [ ] Mapas topográficos
-  - [ ] Separabilidad de clases (espacio de características)
-- [ ] Evaluar añadir una `x` (cerrar) en los widgets.
+  una por una. → Subtítulo eliminado de las 8 páginas (PageShell); el contenido vive en
+  el `?` (cada página ya tenía intro). En EEGNet se fusionó el texto end-to-end en el `?`.
+- [x] Quitar los textos explicativos sueltos de estos paneles (su contenido debería vivir
+  en la zona de explicación): → Obsoleto: ya se consolidaron en las cajas/`?` durante el
+  rewrite de Entrenamiento. Solo queda la etiqueta "Mapas topográficos" (sin párrafo
+  suelto) y el caption de la separabilidad (que pediste aclarar, no eliminar).
+  - [x] Mapas topográficos → solo etiqueta, sin texto suelto.
+  - [x] Separabilidad de clases (espacio de características) → caption breve dentro de la caja.
+- [ ] Evaluar añadir una `x` (cerrar) en los widgets. → **Evaluado, recomiendo NO hacerlo
+  universal:** `GridBoard` reconcilia los widgets desde la lista que pasa cada página, así
+  que cerrar uno sin un camino de "re-añadir" lo haría reaparecer o dejaría la página vacía
+  sin recuperación (salvo borrar localStorage). El Dashboard ya tiene añadir/quitar; el resto
+  son paneles fijos. Si lo quieres igual, habría que añadir estado de removidos + botón de
+  "restaurar disposición" por página. **(pendiente: decidir)**.
 
 ---
 

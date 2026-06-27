@@ -394,7 +394,6 @@ export default function LiveStream() {
   return (
     <PageShell
       title="Clasificación en vivo"
-      subtitle="El recorrido de cada ventana en tiempo real: señal filtrada → CSP → LDA, con decisión continua (umbral + abstención)."
       help={HELP}
       world="online"
     >

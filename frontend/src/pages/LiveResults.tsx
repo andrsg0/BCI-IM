@@ -177,7 +177,6 @@ export default function LiveResults() {
   return (
     <PageShell
       title="Benchmark"
-      subtitle="Comparación honesta por sujeto: los 4 regímenes (CSP+LDA y EEGNet × within/cross) sobre los trials reservados (held-out)."
       help={HELP}
       world="online"
     >

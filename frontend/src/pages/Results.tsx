@@ -679,7 +679,6 @@ export default function Results() {
   return (
     <PageShell
       title="Resultados"
-      subtitle="Benchmark de métodos sobre la población: CSP+LDA vs EEGNet, within vs cross-subject. (El modelo concreto que corre la demo está en «Demo en vivo».)"
       help={HELP}
       world="offline"
     >

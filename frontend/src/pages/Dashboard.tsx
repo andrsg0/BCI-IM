@@ -143,7 +143,6 @@ export default function Dashboard() {
   return (
     <PageShell
       title="Dashboard libre"
-      subtitle="Arma tu propio panel: añade/quita paneles de cualquier sección y reordénalos."
       help={HELP}
       world="online"
     >

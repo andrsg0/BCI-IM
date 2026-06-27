@@ -194,7 +194,6 @@ export default function Brain3DPage() {
   return (
     <PageShell
       title="Cerebro 3D en vivo"
-      subtitle="La cabeza se ilumina con la actividad µ/β de la señal mientras se transmite."
       help={HELP}
       world="online"
     >

@@ -58,9 +58,6 @@ interface LdaResp {
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
 
-// Texto de introducción de la pestaña EEGNet (se muestra bajo el título).
-const INTRO_EEGNET = 'A diferencia del enfoque clásico por pasos, EEGNet es una red neuronal convolucional compacta diseñada específicamente para EEG. Utiliza un aprendizaje de extremo a extremo (end-to-end): el modelo recibe la señal temporal cruda y sus capas internas aprenden de forma automática tanto los filtros temporales como los espaciales más óptimos, sin necesidad de calcular la varianza manualmente.'
-
 // Ayuda única para toda la pestaña CSP + LDA (las tres etapas, en orden).
 const HELP_PIPELINE: HelpContent = {
   pipeline: 'El modelo clásico · CSP → log-varianza → LDA',
@@ -78,7 +75,7 @@ const HELP_PIPELINE: HelpContent = {
 
 const HELP_EEGNET: HelpContent = {
   pipeline: 'Comparación · teoría (CSP) vs datos (EEGNet)',
-  intro: '¿Cómo interpretar los filtros aprendidos por EEGNet? Lo que estás viendo aquí es el interior de una caja negra artificial. Estos mapas topográficos no fueron calculados con la fórmula matemática del CSP; son los pesos que la red neuronal auto-aprendió mediante retropropagación (backpropagation) durante su entrenamiento.',
+  intro: 'A diferencia del enfoque clásico por pasos, EEGNet es una red neuronal convolucional compacta, de extremo a extremo (end-to-end): recibe la señal temporal y sus capas aprenden solas los filtros temporales y espaciales, sin calcular la varianza a mano. ¿Cómo interpretar esos filtros aprendidos? Lo que ves aquí es el interior de la caja negra: estos mapas topográficos no se calcularon con la fórmula del CSP, son los pesos que la red auto-aprendió por retropropagación (backpropagation) durante el entrenamiento.',
   points: [
     { label: 'El Efecto Espejo', desc: 'Nota cómo la red neuronal, por sí sola y tras procesar miles de datos, llegó a una conclusión muy similar a la del CSP: descubrió de forma autónoma que para identificar la imaginación motora tiene que prestarle atención casi exclusiva a la corteza motora (puntos de color intenso sobre C3 y C4).' },
     { label: '¿Por qué no hay sección de Varianza o LDA?', desc: 'Porque EEGNet integra todo en su estructura. Sus capas convolucionales actúan como los filtros (CSP), sus funciones de activación y capas de agrupación (pooling de la red) extraen la información de la energía (log-varianza), y su última capa densa (Softmax) actúa como el clasificador final (LDA).' },
@@ -683,13 +680,12 @@ export default function SpatialCSP() {
 
   // Dos "métodos" enfrentados: el modelo clásico (CSP+LDA) y el aprendido (EEGNet).
   const section = tab === 'eegnet'
-    ? { name: 'EEGNet', intro: INTRO_EEGNET, help: HELP_EEGNET }
-    : { name: 'CSP + LDA', intro: 'El modelo clásico paso a paso: del filtro espacial a la decisión, en orden.', help: HELP_PIPELINE }
+    ? { name: 'EEGNet', help: HELP_EEGNET }
+    : { name: 'CSP + LDA', help: HELP_PIPELINE }
 
   return (
     <PageShell
       title={`Entrenamiento · ${section.name}`}
-      subtitle={section.intro}
       help={section.help}
       world="offline"
     >

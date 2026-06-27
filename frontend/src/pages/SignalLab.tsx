@@ -259,7 +259,6 @@ export default function SignalLab() {
 
   return (
     <PageShell title="Laboratorio de Señales (LTI & CSP)"
-      subtitle="Bienvenido al Laboratorio DSP. Recibes la MISMA señal en vivo que clasifican las demás secciones y manipulas el comportamiento temporal del filtro FIR en tiempo real. Al alterar los coeficientes (taps) y las frecuencias de corte de la respuesta al impulso, modificas la convolución digital y[n] = Σ h[k]·x[n−k], aislando los ritmos Mu y Beta (8–30 Hz) de forma puramente causal."
       help={HELP} world="online">
       {!channels.length ? (
         <div className="flex h-48 items-center justify-center text-slate-300">Cargando…</div>

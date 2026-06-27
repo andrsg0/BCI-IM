@@ -44,7 +44,7 @@ export default function Glossary() {
   }, [entries, query, cat])
 
   return (
-    <PageShell title="Glosario" subtitle="Términos de señales, machine learning y neurofisiología." help={HELP}>
+    <PageShell title="Glosario" help={HELP}>
       {/* buscador + categorías */}
       <div className="mb-5 space-y-3">
         <div className="relative max-w-md">
