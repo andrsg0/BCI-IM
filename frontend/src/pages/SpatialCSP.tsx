@@ -66,7 +66,8 @@ const HELP_PIPELINE: HelpContent = {
   pipeline: 'El modelo clásico · CSP → log-varianza → LDA',
   intro: '¿Cómo se entrena el modelo clásico? La señal, ya filtrada en la banda µ/β, recorre tres etapas lineales encadenadas que ves aquí en orden, con datos reales del sujeto: primero el filtro espacial (CSP), luego la extracción de características (log-varianza) y por último el clasificador (LDA).',
   points: [
-    { label: 'Filtro espacial (CSP)', desc: 'Combina los electrodos para que la diferencia de energía entre imaginar una mano y la otra se note al máximo. Cada topomapa es uno de esos filtros: los colores fuertes (típicamente sobre C3/C4, la corteza motora) marcan los electrodos que más pesan; el blanco, los que aporta poco. El número λ sale del problema de autovalores generalizados e indica a qué mano responde el componente (λ≈1 una, λ≈0 la otra).' },
+    { label: 'Filtro espacial (CSP)', desc: 'Combina los electrodos para que la diferencia de energía entre imaginar una mano y la otra se note al máximo. Cada topomapa muestra el patrón de un componente: los colores fuertes (típicamente sobre C3/C4, la corteza motora) marcan los electrodos que más pesan; el blanco, los que aporta poco. El número λ sale del problema de autovalores generalizados e indica a qué mano responde el componente (λ≈1 una, λ≈0 la otra).' },
+    { label: '¿Por qué el mapa se ilumina del mismo lado de la mano?', desc: 'Parece contradictorio (la corteza controla el lado opuesto), pero es coherente con el ERD: al imaginar una mano, el hemisferio CONTRARIO baja su potencia. El componente, que busca dónde hay MÁS energía para esa clase, acaba resaltando el hemisferio del MISMO lado (ipsilateral), que es el que conserva la potencia. Ambos lados describen el mismo fenómeno lateralizado, visto desde signos opuestos.' },
     { label: 'Características (log-varianza)', desc: 'Un clasificador no entiende ondas, solo números. Por eso cada componente del CSP se resume en su log-varianza (su energía). Así cada intento se vuelve un punto: si las nubes de cada mano se separan, las clases son distinguibles; si se mezclan, habrá errores.' },
     { label: 'Clasificación (LDA)', desc: 'Traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.' },
     { label: 'Validación honesta', desc: 'El modelo se evalúa con intentos que nunca vio durante el entrenamiento (partición held-out), para no engañarnos. Las cifras de precisión (accuracy, κ) y la matriz de confusión se muestran en la sección Resultados.' },
@@ -232,13 +233,13 @@ function CspEquation({ csp }: { csp: CSPResp }) {
       </div>
       <p className="mb-2 text-center text-[11px] text-slate-400">Pulsa una letra para ver qué representa.</p>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="flex-1 overflow-x-auto">
         {sel === 'Z' && (
           <div className="text-sm leading-relaxed text-slate-600">
             <strong>Z — señales virtuales (componentes CSP).</strong> La salida del filtro espacial:
             {' '}{csp.filters.length} «canales virtuales», cada uno una combinación lineal de los{' '}
             {csp.channels.length} electrodos. Su <span className="font-mono">log-varianza</span> es lo que
-            alimenta al clasificador LDA. Cada componente se dibuja como un mapa topográfico arriba.
+            alimenta al clasificador LDA. A cada componente le corresponde un mapa de arriba (su patrón).
           </div>
         )}
         {sel === 'X' && (
@@ -251,10 +252,17 @@ function CspEquation({ csp }: { csp: CSPResp }) {
         )}
         {sel === 'W' && (
           <div>
-            <p className="mb-2 text-xs text-slate-500">
+            <p className="mb-2 text-xs leading-relaxed text-slate-500">
               <strong>W — matriz de filtros espaciales</strong> ({csp.filters.length} componentes ×{' '}
-              {csp.channels.length} canales). Cada fila es un mapa de arriba; el color es el peso de cada
-              electrodo (rojo +, azul −).
+              {csp.channels.length} canales). Cada <strong>fila</strong> es un filtro: los pesos con los que
+              se combinan los electrodos. Así se obtiene cada componente, instante a instante, como una suma
+              ponderada: <span className="font-mono">Z<sub>i</sub>[n] = Σ<sub>j</sub> W<sub>i,j</sub>·X<sub>j</sub>[n]</span>{' '}
+              (el color es el peso: rojo +, azul −).
+            </p>
+            <p className="mb-2 text-[11px] leading-relaxed text-slate-400">
+              Ojo: estos números <strong>no</strong> son los de los mapas de arriba. Los mapas muestran los
+              <em> patrones</em> (la pseudo-inversa de W), que indican de dónde «viene» cada componente y son
+              más fáciles de leer; W son los pesos que de verdad multiplican la señal. Que difieran es normal.
             </p>
             <div className="overflow-x-auto">
               <table className="border-separate" style={{ borderSpacing: 2 }}>
@@ -590,7 +598,7 @@ function CspLdaPipeline({ dataset, subject, csp, lda }: {
             <div className="flex flex-wrap content-start justify-around gap-2">
               {csp.patterns.map((pat, ci) => (
                 <div key={ci} className="text-center">
-                  <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={130} />
+                  <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={150} />
                   <div className="text-sm font-medium text-slate-700">comp {ci}</div>
                   <div className="text-xs text-slate-500">
                     favorece <span style={{ color: CLASS_COLORS[csp.eigenvalues[ci] >= 0.5 ? 0 : 1] }}>{favoredClass(ci)}</span>
