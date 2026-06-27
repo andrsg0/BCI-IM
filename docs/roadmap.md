@@ -165,14 +165,18 @@ esfera/scalp, con heatmap cortical en GPU.
       cada etapa: 1 pipeline LTI ✓, 2 frontend en progreso, 3 interoperabilidad pendiente) y
       una fila «Explora todas las secciones» con accesos a Dashboard, Cerebro 3D y Glosario
       (las que no tenían tarjeta propia en Inicio).
-- [ ] **Dashboard configurable:** menú para **insertar/quitar** gráficos de cualquier
-      sección (cerebro 3D, clasificación, pipeline, etc.). Extender `GridBoard` (no usar
-      `react-grid-layout`). Refs: `pages/Dashboard.tsx`, `components/GridBoard.tsx`.
-  - **Decidido:** comportamiento **mixto según widget** — los que ya transmiten
-    (cerebro 3D, predicción, pipeline) van en vivo cuando se pulsa Play; el resto como
-    resumen/snapshot estático.
-  - **Abierto:** ¿catálogo fijo de widgets disponibles, o registro automático desde cada
-    página?
+- [x] **Dashboard configurable — HECHO (2026-06-26).** Menú **«Añadir panel»** (componente
+      `WidgetPicker`) que inserta cualquier panel del catálogo y botón **×** en la cabecera de
+      cada panel para quitarlo; la selección se persiste (`localStorage` `dashboardWidgets-v1`)
+      aparte de la disposición (`dashboardLayout-v5`). Se **extendió `GridBoard`** vía su
+      reconciliación ya existente (no `react-grid-layout`). Refs: `pages/Dashboard.tsx`.
+  - **Decidido (aplicado):** comportamiento **mixto según widget** — el catálogo etiqueta cada
+    panel `live` (transmite con Play: señal cruda/filtrada, confianza, decisión, predicción,
+    cerebro 3D) o estático (ficha del dataset, resumen sin streaming). El chip «en vivo/estático»
+    se muestra en el menú de inserción.
+  - **Resuelto (era abierto):** se eligió **catálogo fijo** (declarado en `Dashboard.tsx` como
+    `CATALOG`), no registro automático desde cada página — más simple y sin acoplar las páginas a
+    un registro global. Añadir un panel nuevo = una entrada en `CATALOG`.
 
 ## Modelo (antes "Entrenamiento")
 
