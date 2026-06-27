@@ -118,31 +118,29 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 
 ## Resultados
 
-- [ ] Cambiar textos:
-  - [ ] "Demo en vivo (calibrar un día → probar otro)" → "Demo en vivo"
-  - [ ] "Requisito: ≥ 2 sesiones (días distintos) para una estimación honesta inter-sesión."
+- [x] Cambiar textos:
+  - [x] "Demo en vivo (calibrar un día → probar otro)" → "Demo en vivo"
+  - [x] "Requisito: ≥ 2 sesiones (días distintos) para una estimación honesta inter-sesión."
     → borrar.
-  - [ ] "Aparecen también en el benchmark de al lado (cada dataset es autosuficiente)."
+  - [x] "Aparecen también en el benchmark de al lado (cada dataset es autosuficiente)."
     → borrar.
-  - [ ] "Comparación general de métodos · toda la población" → "Comparación general de métodos"
-  - [ ] "Resumen por dataset · CSP+LDA within-subject (media y rango)" → "Resumen por dataset"
-  - [ ] "Comparación de métodos (2×2)" → "Comparación de métodos"
-- [ ] Eliminar la sección "Benchmark de población (todos)": ya no aporta, porque todos los
-  datasets se usan en el benchmark.
-- [ ] En "Comparación general de métodos": extraer la métrica "Wilcoxon p" y darle más
-  énfasis (es importante). Alternativa: llevarla al final, junto con más métricas de
-  comparación y rendimiento.
-- [ ] En "Resumen por dataset": quitar las etiquetas "Medido (2×2 completo)" y cambiar el
-  texto "demo en vivo" por "demo".
-- [ ] En "Comparación de métodos (2×2)": borrar la etiqueta "Medido (2×2)" y los datos que
+  - [x] "Comparación general de métodos · toda la población" → "Comparación general de métodos"
+  - [x] "Resumen por dataset · CSP+LDA within-subject (media y rango)" → "Resumen por dataset"
+  - [x] "Comparación de métodos (2×2)" → "Comparación de métodos"
+- [x] Eliminar la sección "Benchmark de población (todos)": ya no aporta, porque todos los
+  datasets se usan en el benchmark. → `DatasetRolesNote` ahora solo lista los datasets de
+  la demo en vivo (≥2 sesiones).
+- [x] En "Comparación general de métodos": extraer la métrica "Wilcoxon p" y darle más
+  énfasis (es importante). → Caja destacada "Significancia · Wilcoxon pareado" con el
+  p-valor en grande y veredicto significativa/no.
+- [x] En "Resumen por dataset": quitar las etiquetas "Medido (2×2 completo)" y cambiar el
+  texto "demo en vivo" por "demo". → StatusBadge eliminado; `LIVE_TAG` = "demo".
+- [x] En "Comparación de métodos (2×2)": borrar la etiqueta "Medido (2×2)" y los datos que
   aparecen debajo. Mover todo eso a una sección aparte que reúna las métricas de
-  comparación y rendimiento. Los datos a mover son:
-  - Gini · variabilidad inter-sujeto
-  - Azar = 50.0% · left_hand vs right_hand · T = 2s
-  - Within: diferencia CSP+LDA vs EEGNet significativa (Wilcoxon p = 0.020, n = 9)
-  - Cross: diferencia CSP+LDA vs EEGNet no significativa (Wilcoxon p = 0.496, n = 9)
-- [ ] En el gráfico "Accuracy vs κ (kappa de Cohen)", la leyenda del eje X se solapa con la
-  leyenda de colores de los puntos. Separarlas.
+  comparación y rendimiento. → La matriz queda limpia; nueva tarjeta "Métricas de
+  comparación y rendimiento" reúne Azar/clases/T, Wilcoxon within/cross y Gini.
+- [x] En el gráfico "Accuracy vs κ (kappa de Cohen)", la leyenda del eje X se solapa con la
+  leyenda de colores de los puntos. Separarlas. → Leyenda movida arriba (verticalAlign top).
 - [ ] Aclarar por qué solo el dataset 2a tiene "pooled" (¿es por tiempo de cómputo en el
   resto?). **(pendiente: definir)**.
 - [ ] **Falta definir:** qué cambios hacer a la sección desplegable "cómo interpretar estos

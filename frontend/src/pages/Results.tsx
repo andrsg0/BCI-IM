@@ -8,8 +8,8 @@ import type { HelpContent } from '../components/HelpButton'
 import { DatasetRolesNote } from '../components/DatasetRolesNote'
 import { ResultInterpretation } from '../components/ResultInterpretation'
 import {
-  fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, fmtItr, fmtGini, STATUS_LABEL,
-  type DatasetResult, type SubjectRow, type ResultStatus, type AggregateResult,
+  fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, fmtItr, fmtGini,
+  type DatasetResult, type SubjectRow, type AggregateResult,
 } from '../lib/results'
 
 const HELP: HelpContent = {
@@ -22,20 +22,6 @@ const HELP: HelpContent = {
     { label: 'Línea de azar', desc: 'En clasificación binaria el azar es 50%. Cualquier barra debe leerse respecto a esa línea, no respecto a cero.' },
   ],
   terms: ['Validación cruzada', 'Accuracy y kappa', 'CSP', 'EEGNet'],
-}
-
-const STATUS_STYLE: Record<ResultStatus, string> = {
-  measured: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  partial: 'bg-amber-100 text-amber-700 border-amber-200',
-  pending: 'bg-slate-100 text-slate-500 border-slate-200',
-}
-
-function StatusBadge({ status }: { status: ResultStatus }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[status]}`}>
-      {STATUS_LABEL[status]}
-    </span>
-  )
 }
 
 function Card({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
@@ -59,7 +45,7 @@ function Overview({ index, selected, onSelect }: {
   onSelect: (id: string) => void
 }) {
   return (
-    <Card title="Resumen por dataset · CSP+LDA within-subject (media y rango)">
+    <Card title="Resumen por dataset">
       <div className="space-y-3">
         {index.map((d) => {
           const s = d.summary['csp_within_acc']
@@ -73,7 +59,6 @@ function Overview({ index, selected, onSelect }: {
               <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   {d.label}
-                  <StatusBadge status={d.status} />
                   {d.live && (
                     <span
                       className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-600"
@@ -140,7 +125,7 @@ function MatrixTable({ r }: { r: DatasetResult }) {
   )
 
   return (
-    <Card title="Comparación de métodos (2×2)" right={<StatusBadge status={r.status} />}>
+    <Card title="Comparación de métodos">
       <div className="grid grid-cols-[auto_1fr_1fr] gap-2 text-sm">
         <div />
         <div className="text-center text-xs font-semibold uppercase text-slate-400">Within-subject</div>
@@ -163,14 +148,28 @@ function MatrixTable({ r }: { r: DatasetResult }) {
         </div>
       </div>
 
-      <div className="mt-3 space-y-1 text-xs text-slate-500">
+      {!r.has_compare && (
+        <p className="mt-3 text-xs text-amber-600">
+          EEGNet/cross no evaluado en este dataset todavía (solo CSP+LDA within).
+        </p>
+      )}
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Métricas de comparación y rendimiento: significancia (Wilcoxon), condiciones
+// del experimento y variabilidad inter-sujeto (Gini), agrupadas aparte para no
+// recargar la matriz 2×2.
+// ---------------------------------------------------------------------------
+function ComparisonMetrics({ r }: { r: DatasetResult }) {
+  return (
+    <Card title="Métricas de comparación y rendimiento">
+      <div className="space-y-1 text-xs text-slate-500">
         <p>Azar = {pct(r.chance)} · {r.classes.join(' vs ')} · T = {r.trial_time_s}s</p>
         <SignificanceNote label="Within" sig={r.significance.within} />
         <SignificanceNote label="Cross" sig={r.significance.cross} />
-        {!r.has_compare && <p className="text-amber-600">EEGNet/cross no evaluado en este dataset todavía (solo CSP+LDA within).</p>}
       </div>
-
-      {/* Gini indicator */}
       <GiniIndicator gini={r.gini} />
     </Card>
   )
@@ -219,6 +218,23 @@ function pickBest(a: number | null, b: number | null): 'csp' | 'eegnet' | null {
   return a >= b ? 'csp' : 'eegnet'
 }
 
+/** Estadístico Wilcoxon destacado (p-valor grande + veredicto), para la vista agregada. */
+function WilcoxonStat({ label, sig }: { label: string; sig?: { p: number; n: number } }) {
+  if (!sig) return <div className="text-slate-300">{label}: —</div>
+  const signif = sig.p < 0.05
+  return (
+    <div>
+      <div className="text-[11px] text-slate-500">{label} · n = {sig.n}</div>
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        <span className={`text-lg font-bold ${signif ? 'text-emerald-700' : 'text-slate-700'}`}>p = {sig.p.toFixed(3)}</span>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${signif ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+          {signif ? 'significativa' : 'no significativa'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function SignificanceNote({ label, sig }: { label: string; sig?: { p: number; n: number } }) {
   if (!sig) return null
   const signif = sig.p < 0.05
@@ -234,7 +250,7 @@ function SignificanceNote({ label, sig }: { label: string; sig?: { p: number; n:
 // ---------------------------------------------------------------------------
 // Vista general agregada: matriz 2×2 sobre TODA la población (no por dataset).
 // ---------------------------------------------------------------------------
-const LIVE_TAG = 'demo en vivo'
+const LIVE_TAG = 'demo'
 
 function AggregateMatrix({ a }: { a: AggregateResult }) {
   const m = a.matrix
@@ -253,7 +269,7 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
   ]
 
   return (
-    <Card title="Comparación general de métodos · toda la población">
+    <Card title="Comparación general de métodos">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,360px)_1fr]">
         {/* Matriz 2×2 agregada */}
         <div>
@@ -282,10 +298,17 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
               <div className="text-[10px] text-slate-400">n={nOf('eegnet_cross_acc')}</div>
             </div>
           </div>
-          <div className="mt-3 space-y-1 text-xs text-slate-500">
+          <div className="mt-3 space-y-2 text-xs text-slate-500">
             <p>Pooled por sujeto sobre {a.n_datasets} datasets evaluados · azar 50% · n = nº de sujetos.</p>
-            <SignificanceNote label="Within" sig={a.significance.within} />
-            <SignificanceNote label="Cross" sig={a.significance.cross} />
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Significancia · Wilcoxon pareado (CSP+LDA vs EEGNet)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <WilcoxonStat label="Within" sig={a.significance.within} />
+                <WilcoxonStat label="Cross" sig={a.significance.cross} />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -523,7 +546,7 @@ function AccuracyKappaScatter({ r }: { r: DatasetResult }) {
             {/* κ = 0: acuerdo no mejor que el azar. */}
             <ReferenceLine y={0} stroke="#cbd5e1" />
             <Tooltip content={<KappaTooltip />} cursor={{ strokeDasharray: '3 3' }} />
-            <Legend wrapperStyle={{ fontSize: 11 }} iconSize={9} />
+            <Legend verticalAlign="top" align="center" wrapperStyle={{ fontSize: 11, paddingBottom: 8 }} iconSize={9} />
             {series.map((s) => (
               <Scatter key={s.name} name={s.name} data={s.data} fill={s.color} />
             ))}
@@ -683,6 +706,8 @@ export default function Results() {
           {detail ? (
             <>
               <MatrixTable r={detail} />
+
+              <ComparisonMetrics r={detail} />
 
               {(detail.subjects?.length ?? 0) > 0 && (
                 <Card
