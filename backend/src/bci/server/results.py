@@ -50,6 +50,7 @@ def _stats(values: list[float]) -> dict | None:
         return None
     return {
         "mean": float(arr.mean()),
+        "median": float(np.median(arr)),
         "std": float(arr.std(ddof=0)),
         "min": float(arr.min()),
         "max": float(arr.max()),

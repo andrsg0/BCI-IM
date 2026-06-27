@@ -5,6 +5,7 @@ import { getJSON } from '../api/client'
 
 export interface Stat {
   mean: number
+  median: number
   std: number
   min: number
   max: number

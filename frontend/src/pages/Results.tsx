@@ -9,7 +9,7 @@ import { DatasetRolesNote } from '../components/DatasetRolesNote'
 import { ResultInterpretation } from '../components/ResultInterpretation'
 import {
   fetchResultsIndex, fetchDatasetResult, fetchAggregate, pct, kappa, fmtItr, fmtGini,
-  type DatasetResult, type SubjectRow, type AggregateResult,
+  type DatasetResult, type SubjectRow, type AggregateResult, type Stat,
 } from '../lib/results'
 
 const HELP: HelpContent = {
@@ -157,20 +157,79 @@ function MatrixTable({ r }: { r: DatasetResult }) {
   )
 }
 
+// Etiquetas de los 4 regímenes (clave de métrica → nombre legible).
+const REGIME_LABEL: Record<string, string> = {
+  csp_within_acc: 'CSP+LDA within',
+  csp_cross_acc: 'CSP+LDA cross',
+  eegnet_within_acc: 'EEGNet within',
+  eegnet_cross_acc: 'EEGNet cross',
+}
+
+/** Pequeño encabezado de sección dentro de la tarjeta de métricas. */
+function MetricSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{title}</p>
+      {children}
+    </div>
+  )
+}
+
+/** Dispersión entre sujetos por régimen: media ± σ, mediana y rango. Reutilizado por
+ *  el detalle de un dataset y por la vista agregada (toda la población). */
+function DispersionStats({ summary }: { summary: Record<string, Stat> }) {
+  const rows = Object.keys(REGIME_LABEL).filter((k) => summary[k])
+  if (rows.length === 0) return null
+  return (
+    <div className="space-y-1.5">
+      {rows.map((k) => {
+        const s = summary[k]
+        return (
+          <div key={k} className="rounded-md bg-white px-2.5 py-1.5 ring-1 ring-slate-100">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[11px] font-medium text-slate-600">{REGIME_LABEL[k]}</span>
+              <span className="text-sm font-semibold tabular-nums text-slate-800">
+                {pct(s.mean)} <span className="text-xs font-normal text-slate-400">± {(s.std * 100).toFixed(1)} pp</span>
+              </span>
+            </div>
+            <div className="mt-0.5 flex justify-between text-[10px] tabular-nums text-slate-400">
+              <span>mediana {pct(s.median ?? null)}</span>
+              <span>{pct(s.min)}–{pct(s.max)}</span>
+              <span>n={s.n}</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
-// Métricas de comparación y rendimiento: significancia (Wilcoxon), condiciones
-// del experimento y variabilidad inter-sujeto (Gini), agrupadas aparte para no
-// recargar la matriz 2×2.
+// Métricas de comparación y rendimiento: dispersión entre sujetos (media±σ,
+// mediana), significancia (Wilcoxon) y variabilidad inter-sujeto (Gini),
+// agrupadas aparte para no recargar la matriz 2×2.
 // ---------------------------------------------------------------------------
 function ComparisonMetrics({ r }: { r: DatasetResult }) {
   return (
     <Card title="Métricas de comparación y rendimiento">
-      <div className="space-y-1 text-xs text-slate-500">
-        <p>Azar = {pct(r.chance)} · {r.classes.join(' vs ')} · T = {r.trial_time_s}s</p>
-        <SignificanceNote label="Within" sig={r.significance.within} />
-        <SignificanceNote label="Cross" sig={r.significance.cross} />
+      <div className="space-y-3.5">
+        <p className="text-[11px] text-slate-400">
+          Azar {pct(r.chance)} · {r.classes.join(' vs ')} · T = {r.trial_time_s}s
+        </p>
+
+        <MetricSection title="Dispersión entre sujetos">
+          <DispersionStats summary={r.summary} />
+        </MetricSection>
+
+        <MetricSection title="Significancia · Wilcoxon (CSP+LDA vs EEGNet)">
+          <div className="space-y-1 text-xs text-slate-500">
+            <SignificanceNote label="Within" sig={r.significance.within} />
+            <SignificanceNote label="Cross" sig={r.significance.cross} />
+          </div>
+        </MetricSection>
+
+        <GiniIndicator gini={r.gini} />
       </div>
-      <GiniIndicator gini={r.gini} />
     </Card>
   )
 }
@@ -309,6 +368,12 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
                 <WilcoxonStat label="Cross" sig={a.significance.cross} />
               </div>
             </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Dispersión entre sujetos (toda la población)
+              </p>
+              <DispersionStats summary={a.summary} />
+            </div>
           </div>
         </div>
 
@@ -358,45 +423,6 @@ const METRIC_LABEL: Record<Metric, string> = {
   csp_cross_acc: 'CSP+LDA cross',
   eegnet_within_acc: 'EEGNet within',
   eegnet_cross_acc: 'EEGNet cross',
-}
-
-/** Estadísticos de dispersión de una métrica entre sujetos (ignora nulos).
- *  σ muestral (ddof=1): la convención de los papers para "media ± σ". */
-function metricStats(raw: (number | null | undefined)[]) {
-  const a = raw.filter((v): v is number => typeof v === 'number').sort((x, y) => x - y)
-  const n = a.length
-  if (n === 0) return null
-  const mean = a.reduce((s, v) => s + v, 0) / n
-  const median = n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2
-  const std = n > 1 ? Math.sqrt(a.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1)) : 0
-  return { n, mean, median, std, min: a[0], max: a[n - 1] }
-}
-
-/** Resumen estadístico de la métrica seleccionada entre los sujetos del dataset.
- *  Complementa el min–max y el Gini con media ± σ y mediana (robusta al sesgo por
- *  «BCI illiteracy»). Se calcula en el cliente desde los datos por sujeto. */
-function MetricStats({ r, metric }: { r: DatasetResult; metric: Metric }) {
-  const stats = useMemo(
-    () => metricStats((r.subjects ?? []).map((s) => s[metric] as number | null)),
-    [r.subjects, metric],
-  )
-  if (!stats) return null
-  const items: { label: string; v: string; hint?: string }[] = [
-    { label: 'media ± σ', v: `${pct(stats.mean)} ± ${(stats.std * 100).toFixed(1)} pp`, hint: 'σ muestral, en puntos porcentuales' },
-    { label: 'mediana', v: pct(stats.median), hint: 'robusta a sujetos cerca del azar' },
-    { label: 'rango', v: `${pct(stats.min)}–${pct(stats.max)}` },
-    { label: 'n', v: String(stats.n), hint: 'sujetos con esta métrica' },
-  ]
-  return (
-    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs">
-      {items.map((it) => (
-        <span key={it.label} className="flex items-baseline gap-1.5" title={it.hint}>
-          <span className="text-slate-400">{it.label}</span>
-          <span className="font-medium tabular-nums text-slate-700">{it.v}</span>
-        </span>
-      ))}
-    </div>
-  )
 }
 
 function SubjectChart({ r, metric, onPick, selected }: {
@@ -729,14 +755,15 @@ export default function Results() {
 
       {aggregate && <div className="mb-4"><AggregateMatrix a={aggregate} /></div>}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
-        {/* Columna izquierda: resumen / selector */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+        {/* Columna izquierda: resumen por dataset + métricas (aprovecha el alto) */}
         <div className="space-y-4">
           {index ? (
             <Overview index={index} selected={selected} onSelect={setSelected} />
           ) : (
             <Card title="Resumen"><Skeleton /></Card>
           )}
+          {detail && <ComparisonMetrics r={detail} />}
         </div>
 
         {/* Columna derecha: detalle del dataset seleccionado */}
@@ -744,8 +771,6 @@ export default function Results() {
           {detail ? (
             <>
               <MatrixTable r={detail} />
-
-              <ComparisonMetrics r={detail} />
 
               {(detail.subjects?.length ?? 0) > 0 && (
                 <Card
@@ -763,7 +788,6 @@ export default function Results() {
                   }
                 >
                   <SubjectChart r={detail} metric={metric} onPick={setSubject} selected={subject} />
-                  <MetricStats r={detail} metric={metric} />
                   <div className="mt-4">
                     <SubjectTable r={detail} selected={subject} onPick={setSubject} />
                   </div>
