@@ -114,11 +114,16 @@ Medido en 2a (9 sujetos, mismos folds, `compare_methods_BNCI2014_001.csv`):
 Simular una señal de la que **no se conoce el inicio ni el fin** (como un casco real),
 en lugar de reproducir trials recortados con fronteras conocidas.
 
-- [ ] **B.1 — Loader continuo.** Reutilizar la señal `Raw` continua de MOABB (ya existe
-      antes del epoching; ver `moabb_loader.py:128`). Endpoints ya disponibles:
-      `/api/continuous`, `/api/continuous_all`, `_get_raw()` en `server/app.py` — pero hoy
-      toman la **primera** sesión/run, no la held-out. Decidir qué tramo continuo replicar
-      en la demo (idealmente el held-out, coherente con el split honesto de `training.py`).
+- [x] **B.1 — Laboratorio sobre la MISMA señal en vivo — HECHO (2026-06-27).** El Laboratorio
+      ya NO carga su propio tramo de 30 s (`/continuous_all`): ahora se conecta al **mismo
+      WebSocket `/ws/stream`** que las demás secciones en vivo, así reproduce EXACTAMENTE los
+      mismos trials held-out y muestra la **misma duración/barra de progreso**. Para soportar
+      sus gráficas multicanal + componentes CSP, el WS acepta `allch=1` y manda `raw_all` (todos
+      los canales del chunk, ~550 nº/frame) + `channels`; el simulador (`StreamSimulator` y
+      `EEGNetStreamSimulator`) gana `include_all`. El lab **acumula** el stream y **filtra en
+      cliente** con la banda/taps elegidos (sigue siendo interactivo) y combina CSP. Se eliminó
+      el modelo de precarga+reveln (overlay/scrub). (Nota: `/api/continuous*` siguen para usos
+      puntuales, pero el lab ya no depende de ellos.)
 - [ ] **B.2 — Quitar dependencia de `alo`/`ahi`.** Hoy `ws_stream` calcula bordes de
       ventana activa por trial (`app.py:427-428`) y el front filtra por ellos
       (`LiveStream.tsx:156`). En señal continua no hay fronteras: clasificar de forma

@@ -588,7 +588,7 @@ def continuous_all(dataset: str, subject: int = 1, seconds: float = 30):
 # --- WebSocket: simulación en vivo -----------------------------------------
 @app.websocket('/ws/stream')
 async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject: int = 1,
-                    channel: str = 'C3', method: str = 'csp_lda'):
+                    channel: str = 'C3', method: str = 'csp_lda', allch: bool = False):
     await websocket.accept()
     loop = asyncio.get_event_loop()
     if method not in VALID_METHODS:
@@ -646,12 +646,16 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
         j = 0
         while True:
             idx = int(idx_demo[j])
-            results = await loop.run_in_executor(None, sim.stream, data.X[idx])
+            results = await loop.run_in_executor(
+                None, lambda: sim.stream(data.X[idx], include_all=allch))
             for r in results:
                 await websocket.send_json({
                     'trial': idx, 'true': str(data.y[idx]),
                     't': r['t'], 'pred': r['pred'], 'probs': r['probs'],
                     'power': r['power'], 'raw': r.get('raw'), 'filt': r.get('filt'),
+                    # Todos los canales crudos del chunk (Laboratorio multicanal): solo si
+                    # se pidió ``allch`` (si no, None y los demás consumidores lo ignoran).
+                    'raw_all': r.get('raw_all'), 'channels': data.ch_names if allch else None,
                     # Etapas CSP (vector log-varianza) y LDA (proyección discriminante)
                     # de la ventana, para diferenciarlas en la sección En vivo.
                     'feat': r.get('feat'), 'disc': r.get('disc'),

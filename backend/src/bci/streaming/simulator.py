@@ -67,7 +67,8 @@ class StreamSimulator:
         self.realtime_factor = realtime_factor
         self.ref_idx = ref_idx   # canal de referencia para enviar señal cruda/filtrada (opcional)
 
-    def stream(self, X_cont: np.ndarray, sleep: bool = False, on_predict=None):
+    def stream(self, X_cont: np.ndarray, sleep: bool = False, on_predict=None,
+               include_all: bool = False):
         """Emite predicciones a lo largo de una señal continua (n_canales, n_muestras).
 
         Parameters
@@ -109,6 +110,10 @@ class StreamSimulator:
                 if self.ref_idx is not None:
                     rec["raw"] = (chunk[self.ref_idx] * 1e6).tolist()
                     rec["filt"] = (f[self.ref_idx] * 1e6).tolist()
+                # Todos los canales crudos del chunk (para el Laboratorio multicanal,
+                # que filtra en cliente). Solo bajo petición, para no engordar el frame.
+                if include_all:
+                    rec["raw_all"] = (chunk * 1e6).tolist()
                 results.append(rec)
                 if on_predict is not None:
                     on_predict(rec)
@@ -147,7 +152,7 @@ class EEGNetStreamSimulator:
         self.step = int(step)
         self.ref_idx = ref_idx
 
-    def stream(self, X_cont: np.ndarray, on_predict=None):
+    def stream(self, X_cont: np.ndarray, on_predict=None, include_all: bool = False):
         n_ch, N = X_cont.shape
         fir = CausalFIR(self.h, n_ch)
         filtered = np.zeros((n_ch, 0))
@@ -171,6 +176,10 @@ class EEGNetStreamSimulator:
                 if self.ref_idx is not None:
                     rec["raw"] = (chunk[self.ref_idx] * 1e6).tolist()
                     rec["filt"] = (f[self.ref_idx] * 1e6).tolist()
+                # Todos los canales crudos del chunk (para el Laboratorio multicanal,
+                # que filtra en cliente). Solo bajo petición, para no engordar el frame.
+                if include_all:
+                    rec["raw_all"] = (chunk * 1e6).tolist()
                 results.append(rec)
                 if on_predict is not None:
                     on_predict(rec)
