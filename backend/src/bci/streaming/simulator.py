@@ -166,11 +166,11 @@ class EEGNetStreamSimulator:
                 filtered = filtered[:, -self.window:]
 
             if filtered.shape[1] == self.window:
+                power = np.log(np.var(filtered, axis=1) + 1e-12)
                 proba = self.clf.predict_proba(filtered[None, :, :])[0]
                 classes = [str(c) for c in self.clf.classes_]
                 pred = classes[int(np.argmax(proba))]
                 probs = {c: float(p) for c, p in zip(classes, proba)}
-                power = np.log(np.var(filtered, axis=1) + 1e-12)
                 rec = {"t": (start + self.step) / self.fs, "pred": pred, "probs": probs,
                        "power": power.tolist(), "feat": None, "disc": None}
                 if self.ref_idx is not None:

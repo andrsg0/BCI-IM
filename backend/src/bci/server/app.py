@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 
 from bci.config import BACKEND_ROOT, load_config, resolve_path
-from bci.datasets.moabb_loader import EpochedData, load_from_config
+from bci.datasets.moabb_loader import EpochedData, load_dataset, load_from_config
 from bci.dsp.convolution import apply_filter
 from bci.dsp.fir_filters import design_bandpass_fir
 from bci.dsp.frequency_response import frequency_response
@@ -34,7 +34,7 @@ from bci.pipeline.training import (
 )
 from bci.server import payloads as pl
 from bci.server import results as results_mod
-from bci.streaming.simulator import EEGNetStreamSimulator, StreamSimulator
+from bci.streaming.simulator import CausalFIR, EEGNetStreamSimulator, StreamSimulator
 
 # Métodos válidos para el selector de 4 regímenes (within/cross × CSP/EEGNet).
 WITHIN_METHODS = ('csp_lda', 'eegnet')
@@ -71,6 +71,9 @@ app.add_middleware(
 
 # --- Cachés en memoria -----------------------------------------------------
 _data_cache: dict[tuple[str, int], EpochedData] = {}
+# Igual que _data_cache pero con un epoch MÁS ANCHO (incluye el reposo pre-cue):
+# solo para el stream de la demo en vivo (señal "realista" sin fronteras conocidas).
+_demo_data_cache: dict[tuple[str, int], EpochedData] = {}
 # Modelos cacheados por (dataset, subject, method). El valor es (modelo, ficha).
 _model_cache: dict[tuple[str, int, str], tuple[object, dict]] = {}
 
@@ -95,6 +98,49 @@ def _get_data(dataset: str, subject: int) -> EpochedData:
         cfg['dataset']['subjects'] = [subject]
         _data_cache[key] = load_from_config(cfg)
     return _data_cache[key]
+
+
+def _get_demo_data(dataset: str, subject: int) -> tuple[EpochedData, float]:
+    """Datos para el STREAM en vivo, epochados MÁS ANCHO para incluir el reposo.
+
+    El modelo se entrena con la ventana de epoching del YAML (p. ej. [2, 6] s del 2a,
+    que es ya casi toda la imaginación activa). Para que la demo simule una señal
+    "realista" —de la que no se conoce el inicio ni el fin, como un casco real— el
+    stream arranca el epoch ANTES del cue (``streaming.demo_baseline_s`` segundos de
+    fijación/reposo), manteniendo el mismo ``tmax``. Así la señal contiene tramos sin
+    intención motora y el clasificador continuo debe ABSTENERSE en ellos por confianza,
+    en vez de apoyarse en las fronteras conocidas del trial.
+
+    Devuelve ``(EpochedData, shift_s)`` donde ``shift_s`` es cuánto se adelantó el inicio
+    respecto al epoch de entrenamiento (para recolocar la franja activa en el eje ``t``).
+    Si el epoch ancho no cuadra trial-a-trial con el de entrenamiento (orden/conteo),
+    cae con gracia al epoch normal (``shift_s = 0``).
+    """
+    key = (dataset, subject)
+    cfg = _config_for(dataset)
+    epo = cfg.get('epoching', {})
+    epo_tmin = float(epo.get('tmin') or 0.0)
+    # Reposo a prepender: por defecto, todo lo que haya entre el onset y el inicio de
+    # la ventana de entrenamiento (el periodo de fijación previo al cue).
+    baseline_s = float(cfg.get('streaming', {}).get('demo_baseline_s', epo_tmin))
+    shift = max(0.0, min(baseline_s, epo_tmin))   # no nos pasamos del onset
+    if shift <= 0.0:                              # sin reposo que añadir: epoch normal
+        return _get_data(dataset, subject), 0.0
+    if key not in _demo_data_cache:
+        narrow = _get_data(dataset, subject)
+        ds = cfg['dataset']
+        wide = load_dataset(
+            name=ds['name'], subjects=[subject], classes=ds.get('classes'),
+            tmin=epo_tmin - shift, tmax=float(epo['tmax']),
+            picks=epo.get('picks', 'eeg'), baseline=epo.get('baseline'),
+        )
+        # El epoch ancho debe cuadrar trial-a-trial con el normal (mismos eventos en el
+        # mismo orden); si MNE descartó alguno por bordes del registro, no es seguro
+        # reutilizar idx_demo → caemos al epoch normal sin reposo.
+        if wide.n_trials != narrow.n_trials:
+            return narrow, 0.0
+        _demo_data_cache[key] = wide
+    return _demo_data_cache[key], shift
 
 
 def _ensure_model(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[object, dict]:
@@ -179,6 +225,107 @@ def _split_idx(dataset: str, subject: int, method: str = 'csp_lda') -> tuple[np.
         idx_demo = np.array(spec['indices'], dtype=int)
     idx_train = np.array([i for i in range(n) if i not in set(idx_demo.tolist())], dtype=int)
     return idx_train, idx_demo
+
+
+def _make_sim(method: str, model, cfg: dict, fs: float, ref_idx: int,
+              win: dict | None, n_times: int):
+    """Construye el simulador de streaming según el método y devuelve (sim, win_s).
+
+    Único punto de creación del simulador: lo usan tanto ``ws_stream`` (transmisión)
+    como ``_ensure_rest_detector`` (calibración), para que las features de potencia de
+    banda sean IDÉNTICAS en ambos.
+    """
+    s = cfg['streaming']
+    ws_len = s['window_s']
+    step = s['step_s']
+    if method in ('csp_lda', 'csp_lda_cross'):
+        return StreamSimulator(model, window_s=ws_len, step_s=step, ref_idx=ref_idx), ws_len
+    eeg_cfg = cfg.get('eegnet') or {}
+    low = float(eeg_cfg.get('band_low', 4.0))
+    high = min(float(eeg_cfg.get('band_high', 40.0)), fs / 2 - 1)
+    band = design_bandpass_fir(low, high, fs, 101)
+    w0 = int(win['tmin_rel'] * fs) if win else 0
+    w1 = int(win['tmax_rel'] * fs) if win else n_times
+    return EEGNetStreamSimulator(model, band.h, fs, w1 - w0, int(step * fs), ref_idx=ref_idx), (w1 - w0) / fs
+
+
+# Detector de REPOSO (no-control state), cacheado por (dataset, subject, method).
+# ``None`` = no disponible (p. ej. regímenes cross: el modelo no vio a este sujeto,
+# así que no hay partición de entrenamiento local para calibrarlo sin fuga).
+_rest_detector_cache: dict[tuple[str, int, str], object | None] = {}
+
+
+def _ensure_rest_detector(dataset: str, subject: int, method: str):
+    """Entrena (y cachea) un detector lineal REPOSO-vs-ACTIVO sobre la potencia de banda.
+
+    B.4 / problema del *no-control state*: un LDA binario no tiene clase «reposo» y es
+    sobreconfiado, así que el umbral de confianza no abstiene en reposo. Este detector
+    es una compuerta OPCIONAL: un clasificador lineal (regresión logística) sobre el
+    mismo vector de log-varianza por canal (potencia µ/β) que ya emite el simulador,
+    calibrado con las ventanas pre-cue (reposo) vs. las de la franja activa de la
+    partición de ENTRENAMIENTO (sin tocar el held-out de la demo).
+
+    Es un paliativo, no una solución: la separabilidad reposo/activo es modesta
+    (AUC≈0.71 en 2a s1), pero reduce las falsas alarmas a la mitad. Devuelve un objeto
+    con ``predict_proba`` (P[activo] en la columna 1) o ``None`` si no se puede calibrar.
+    """
+    key = (dataset, subject, method)
+    if key in _rest_detector_cache:
+        return _rest_detector_cache[key]
+    try:
+        model, _card = _ensure_model(dataset, subject, method)
+        idx_train, _ = _split_idx(dataset, subject, method)
+    except HTTPException:
+        _rest_detector_cache[key] = None
+        return None
+    if len(idx_train) < 10:                      # cross (vacío) o demasiado pocos
+        _rest_detector_cache[key] = None
+        return None
+
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    demo, shift = _get_demo_data(dataset, subject)
+    cfg = _config_for(dataset)
+    win = cfg.get('classification_window')
+    fs = demo.sfreq
+    sim, win_s = _make_sim(method, model, cfg, fs, 0, win, demo.X.shape[2])
+    # Mismos parámetros que el stream en vivo: el FIR del método, el tamaño de ventana y
+    # el paso (en muestras). Solo necesitamos la potencia de banda, NO la predicción.
+    window, step = sim.window, sim.step
+    h = getattr(sim, 'h', None) or sim.pipe.filt.h   # EEGNet: sim.h ; CSP+LDA: FIR del pipeline
+    cue = float(cfg.get('epoching', {}).get('tmin') or 0.0)   # eje wide: onset=0, cue=tmin
+    alo = (win['tmin_rel'] + win_s / 2 + shift) if win else 0.0
+    ahi = (win['tmax_rel'] + win_s / 2 + shift) if win else 1e9
+    n_ch = demo.X.shape[1]
+    X: list = []
+    y: list = []
+    for i in idx_train:
+        # CLAVE de rendimiento: filtramos el trial ENTERO de una sola pasada (la CausalFIR
+        # da idéntico resultado que filtrar por chunks) y deslizamos ventanas con numpy.
+        # Evita el bucle Python de ~60 convoluciones/trial del simulador (~60x más rápido).
+        trial = demo.X[int(i)]
+        Ffull = CausalFIR(h, n_ch).process_chunk(trial)
+        for e in range(window, trial.shape[1] + 1, step):
+            t = e / fs                           # fin de ventana, igual que el 't' del stream
+            if t <= cue + 0.05:                  # ventana enteramente pre-cue -> reposo
+                lab = 0
+            elif alo <= t <= ahi:                # franja de imaginación activa
+                lab = 1
+            else:
+                continue
+            power = np.log(np.var(Ffull[:, e - window:e], axis=1) + 1e-12)
+            X.append(power); y.append(lab)
+    if sum(y) < 5 or (len(y) - sum(y)) < 5:      # muy pocas muestras de una clase
+        _rest_detector_cache[key] = None
+        return None
+    det = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000, class_weight='balanced'),
+    ).fit(np.asarray(X, dtype=float), np.asarray(y))
+    _rest_detector_cache[key] = det
+    return det
 
 
 # --- REST ------------------------------------------------------------------
@@ -607,6 +754,9 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
             await websocket.send_json({'error': exc.detail})
             await websocket.close()
             return
+        # Señal del STREAM: epoch ancho que incluye el reposo pre-cue (ver _get_demo_data).
+        # idx_demo se calcula sobre `data` (normal) pero cuadra trial-a-trial con `demo`.
+        demo, shift_s = await loop.run_in_executor(None, _get_demo_data, dataset, subject)
         cfg = _config_for(dataset)
         s = cfg['streaming']
         ws_len = s['window_s']
@@ -617,29 +767,33 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
         win = cfg.get('classification_window')
 
         # Selección del simulador según el método (CSP→LDA vs EEGNet).
-        if method in ('csp_lda', 'csp_lda_cross'):
-            sim = StreamSimulator(model, window_s=ws_len, step_s=step, ref_idx=ref_idx)
-            win_s = ws_len
-        else:  # eegnet / eegnet_cross: banda amplia + ventana = longitud de entrenamiento
-            eeg_cfg = cfg.get('eegnet') or {}
-            low = float(eeg_cfg.get('band_low', 4.0))
-            high = min(float(eeg_cfg.get('band_high', 40.0)), fs / 2 - 1)
-            band = design_bandpass_fir(low, high, fs, 101)
-            w0 = int(win['tmin_rel'] * fs) if win else 0
-            w1 = int(win['tmax_rel'] * fs) if win else data.X.shape[2]
-            sim = EEGNetStreamSimulator(model, band.h, fs, w1 - w0, int(step * fs), ref_idx=ref_idx)
-            win_s = (w1 - w0) / fs
+        sim, win_s = _make_sim(method, model, cfg, fs, ref_idx, win, demo.X.shape[2])
+        # Detector de reposo OPCIONAL (compuerta anti-falsas-alarmas, ver
+        # _ensure_rest_detector). La calibración es costosa la 1ª vez, así que NO bloquea
+        # el arranque del stream: si ya está cacheada se usa al instante; si no, se calcula
+        # en segundo plano y `p_act` empieza a salir (deja de ser None) cuando esté lista.
+        # El toggle del frontend está OFF por defecto, así que no se necesita de inmediato.
+        det_key = (dataset, subject, method)
+        det_box = {'d': _rest_detector_cache.get(det_key)}
+        if det_key not in _rest_detector_cache:
+            async def _calibrate():
+                det_box['d'] = await loop.run_in_executor(
+                    None, _ensure_rest_detector, dataset, subject, method)
+            asyncio.create_task(_calibrate())
 
-        # Ventana de imaginación ACTIVA en el eje 't' (fin de ventana): el centro de la
-        # ventana (t - win_s/2) debe caer en [tmin_rel, tmax_rel]. El frontend usa
-        # estos límites para que la decisión por trial solo cuente las ventanas útiles.
-        alo = (win['tmin_rel'] + win_s / 2) if win else 0.0
-        ahi = (win['tmax_rel'] + win_s / 2) if win else 1e9
+        # Franja de imaginación ACTIVA en el eje 't' (fin de ventana): el centro de la
+        # ventana (t - win_s/2) debe caer en [tmin_rel, tmax_rel]. Con el epoch ancho la
+        # señal arranca `shift_s` segundos ANTES (reposo), así que la franja se desplaza
+        # otro tanto. El frontend ya NO usa estos límites para decidir (clasifica de forma
+        # continua con umbral/abstención); los manda solo como VERDAD DE TERRENO: puntuar
+        # el acierto y mover el muñeco demostrativo en la franja correcta.
+        alo = (win['tmin_rel'] + win_s / 2 + shift_s) if win else 0.0
+        ahi = (win['tmax_rel'] + win_s / 2 + shift_s) if win else 1e9
 
         # La señal de la demo es FINITA: cada pasada recorre los trials reservados una
         # vez (n_demo trials × trial_s segundos) y luego repite. Mandamos la posición en
         # la tanda (demo_i/demo_n) y la duración de trial para una barra de progreso.
-        trial_s = data.X.shape[2] / fs
+        trial_s = demo.X.shape[2] / fs
         n_demo = len(idx_demo)
 
         # Reproduce SOLO los trials reservados (held-out) en bucle.
@@ -647,11 +801,16 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
         while True:
             idx = int(idx_demo[j])
             results = await loop.run_in_executor(
-                None, lambda: sim.stream(data.X[idx], include_all=allch))
+                None, lambda: sim.stream(demo.X[idx], include_all=allch))
             for r in results:
+                # P[activo] de la ventana según el detector de reposo (None si aún no
+                # está calibrado o no está disponible en este régimen).
+                det = det_box['d']
+                p_act = (float(det.predict_proba([r['power']])[0, 1])
+                         if det is not None else None)
                 await websocket.send_json({
-                    'trial': idx, 'true': str(data.y[idx]),
-                    't': r['t'], 'pred': r['pred'], 'probs': r['probs'],
+                    'trial': idx, 'true': str(demo.y[idx]),
+                    't': r['t'], 'pred': r['pred'], 'probs': r['probs'], 'p_act': p_act,
                     'power': r['power'], 'raw': r.get('raw'), 'filt': r.get('filt'),
                     # Todos los canales crudos del chunk (Laboratorio multicanal): solo si
                     # se pidió ``allch`` (si no, None y los demás consumidores lo ignoran).

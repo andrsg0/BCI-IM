@@ -124,10 +124,38 @@ en lugar de reproducir trials recortados con fronteras conocidas.
       cliente** con la banda/taps elegidos (sigue siendo interactivo) y combina CSP. Se eliminó
       el modelo de precarga+reveln (overlay/scrub). (Nota: `/api/continuous*` siguen para usos
       puntuales, pero el lab ya no depende de ellos.)
-- [ ] **B.2 — Quitar dependencia de `alo`/`ahi`.** Hoy `ws_stream` calcula bordes de
-      ventana activa por trial (`app.py:427-428`) y el front filtra por ellos
-      (`LiveStream.tsx:156`). En señal continua no hay fronteras: clasificar de forma
-      continua con **umbral de confianza / abstención** en vez de votar dentro del trial.
+- [x] **B.2 — Quitar dependencia de `alo`/`ahi` en la DECISIÓN — HECHO (2026-06-27).**
+      Dos cambios: **(1) Lado dato** — el `/ws/stream` epocha más ANCHO solo para la demo
+      (`_get_demo_data` en `app.py`: `tmin=0` manteniendo `tmax`, vía `streaming.demo_baseline_s`,
+      por defecto = todo el reposo pre-cue; cuadra trial-a-trial con el epoch de entrenamiento,
+      sin fuga). Así la señal en vivo incluye los ~2 s de reposo previos al cue (2a: trial de
+      4→6 s). **(2) Lado decisión** — `LiveStream.tsx` ya NO vota dentro de `[alo, ahi]`: clasifica
+      de forma **continua** con EWMA de la probabilidad (α=0.25, sin reinicio entre trials) +
+      umbral. `alo`/`ahi` se siguen mandando pero SOLO como verdad de terreno (puntuar el acierto
+      por trial + mover el muñeco), nunca para decidir.
+  - **Hallazgo importante (el motivo de Plan B):** quitar la "trampa" temporal **destapa** el
+    problema del *no-control state*. La precisión durante la imaginación es buena (≈0.88–0.90 en
+    2a s1), pero el umbral de confianza **NO** abstiene en reposo: un LDA binario es sobreconfiado
+    (conf. media en reposo ≈0.97 > activa ≈0.92) y ni la confianza ni la magnitud de las features
+    CSP separan reposo de activo (d′≈0.27). Resultado: muchas **falsas alarmas** en reposo (se
+    cuentan en un panel nuevo); subir el umbral las reduce pero nunca las elimina. La UI/ayuda lo
+    enseña como el límite real que es.
+- [x] **B.4 — Detector de reposo (compuerta opcional) — HECHO (2026-06-27).** Mitigación del
+      no-control state: `_ensure_rest_detector` (`app.py`) entrena un clasificador LINEAL (regresión
+      logística) sobre la potencia de banda µ/β por canal (el mismo `power` que ya emite el
+      simulador), calibrado con ventanas reposo (pre-cue) vs. activas de la partición de
+      ENTRENAMIENTO (sin fuga). El `/ws/stream` manda `p_act` (P[ventana=activa]) por frame;
+      `LiveStream.tsx` añade un toggle «detector de reposo» que, si está ON, exige `p_act≥0.5`
+      además de la confianza para comprometerse. **Es un paliativo, no una solución:** separabilidad
+      modesta (AUC≈0.71 en 2a s1) → falsas alarmas ~−45% pero pierde ~20% de trials reales. Cómputo
+      trivial (lineal, sin GPU). **Calibración optimizada:** filtra cada trial de una pasada con la
+      `CausalFIR` (idéntico a por-chunks) + ventanas vectorizadas, en vez de stream-ear por el
+      simulador → ~0.8 s en lugar de ~26 s; además se calcula en **segundo plano** (no bloquea el
+      arranque del stream: `p_act` empieza a salir cuando está lista). Cacheado. No disponible en
+      regímenes **cross** (sin partición local del sujeto para calibrar sin fuga): el toggle se
+      deshabilita. Default OFF para que el contraste ON/OFF sea visible. Ver [[no-control-state]].
+  - **Explicación divulgativa completa (del problema a la solución, para alguien sin conocimientos
+    previos):** [`docs/reposo-no-control-state.md`](reposo-no-control-state.md).
 - [x] **B.3 — Widget "muñeco de brazos" — HECHO.** `components/HandPuppet.tsx`: muñeco SVG
       (vista de espaldas, sin espejo: mano izq. del muñeco = izq. del espectador) que levanta
       y saluda con el brazo correspondiente. **Decidido (matiz del usuario):** se mueve según
