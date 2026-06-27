@@ -35,9 +35,9 @@ Hoy CSP+LDA es **sujeto-específico** y EEGNet solo se usa para *visualizar* fil
       sobre todos los datasets + Wilcoxon). Endpoints `/api/results*` y `/api/results_aggregate`.
 - Refs: `backend/src/bci/models/eegnet.py`, `pipeline/training.py`
   (`train_eegnet_subject`, `train_eegnet_pooled`), `docs/presentacion.md` ("Próximos pasos").
-- **Abierto:** ¿EEGNet pooled llega a usarse en vivo, o sigue siendo solo comparación
-  con el CSP+LDA sujeto-específico? (Hoy CLAUDE.md dice explícitamente que EEGNet NO
-  se usa en inferencia en vivo — revisar esa decisión si se quiere demo cross-subject.)
+- **Resuelto (2026-06):** EEGNet **SÍ** se usa en vivo. Es uno de los 4 regímenes de la página
+  de Clasificación (CSP+LDA / EEGNet × within / cross), entrenado cross-subject DENTRO de cada
+  dataset (N-1 sujetos → sujeto held-out). No hay pooled cross-dataset.
 
 ## A+. Escalado de datos y comparación de métodos
 
@@ -80,14 +80,13 @@ Medido en 2a (9 sujetos, mismos folds, `compare_methods_BNCI2014_001.csv`):
       `augment_trials()` aplica ruido gaussiano leve, desplazamiento temporal y escalado de
       amplitud, **solo en la partición de entrenamiento** (no fuga de datos). Integrado en
       `train_eegnet_pooled(augment=True, augment_copies=...)` y en el CLI (`--augment`).
-- [~] **Paso 2 — Escalar sujetos con PhysionetMI (gran salto) — LISTO PARA EJECUTAR.** El
-      script ya soporta el run grande: `--config ../configs/physionet.yaml`, los ~105 sujetos
-      (excluyendo 88/89/92/100), `--augment` y `--loso-subset N` (LOSO sobre un subconjunto;
-      modelo base con todos). **Proceso documentado en `docs/entrenamiento.md`** (comandos
-      exactos para correr en terminal propia, sin gastar tokens). Expectativa: LOSO ~0.60 →
-      ~0.65–0.70. Falta solo lanzarlo y registrar el resultado.
-      **PhysioNet ES la vía recomendada para EEGNet pooled** (verificado 2026-06-21: S2 0.622
-      con 11 suj, escala con datos).
+- [x] **Paso 2 — Escalar con PhysionetMI — CANCELADO (cambio de plan 2026-06-26).** Se abandona
+      PhysioNet como vía de escalado. El nuevo plan usa **datasets multi-sesión** (≥2 sesiones)
+      que sirven a la vez para **demo en vivo y entrenamiento**: **2a (BNCI2014_001, 2 sesiones),
+      2b (BNCI2014_004, 5 sesiones) y Kumar2024 (6 sesiones)** — ver memoria
+      `arquitectura-datasets-regimenes`. El cross-subject se entrena DENTRO de cada dataset (N-1
+      sujetos → sujeto held-out), no con un pool de PhysioNet. Configs PhysioNet/REGISTRY ya
+      eliminados.
 - [x] **RESUELTO: EEGNet en Dreyer2023 era un artefacto de BANDA.** Diagnóstico 2026-06-21:
       EEGNet colapsaba a 0.500 porque, con banda amplia 4–40 Hz, se sobreajustaba a un
       artefacto fuera de la banda MI (4–13 Hz: deriva/ocular/alfa); CSP (restringido a
@@ -100,17 +99,12 @@ Medido en 2a (9 sujetos, mismos folds, `compare_methods_BNCI2014_001.csv`):
 - [ ] **Paso 4 — Fine-tuning con calibración corta.** Congelar capas tempranas del modelo
       base pooled y adaptar las últimas con 20–40 trials del usuario nuevo (1–2 runs). Es el
       paso que de verdad lleva a un usuario concreto hacia 0.75–0.85.
-- [~] **Paso 3 — Pooling entre datasets — IMPLEMENTADO (falta lanzar el run grande).** Cubre
-      temas de **Sistemas Lineales y Señales**: remuestreo racional L/M a un fs común (sobremuestreo
-      + filtro FIR anti-aliasing + diezmado) y armonización de montajes (19 canales motores comunes).
-      Hecho: `bci/dsp/resampling.py` (`resample_lti`, verificado corr=1.0 vs scipy y anti-aliasing OK),
-      `design_lowpass_fir` en `fir_filters.py`, y `scripts/train_eegnet_crossdataset.py` (LODO =
-      leave-one-dataset-out). **Proceso y parámetros documentados para la presentación en
-      `docs/remuestreo.md`.** Falta lanzar el entrenamiento grande y registrar resultados.
-      **Pool propuesto y criterios en `docs/datasets.md`**: PhysioNet (109) + **Dreyer2023 (87)**
-      + **Cho2017 (52)**, ambos ya integrados ≈ 248 sujetos. Lee2019_MI se **descartó** (pesaba
-      ~1.2 GB/sujeto y MOABB 1.5.0 solo exponía 1 de sus 2 sesiones — datasets.md §3.1).
-      Para EN VIVO (calibrar≠probar): 2a + Stieger2021 (11 sesiones, pendiente).
+- [x] **Paso 3 — Pooling entre datasets (LODO) — CANCELADO (cambio de plan 2026-06-26).** Ya
+      NO se hace EEGNet cross-dataset (leave-one-dataset-out); **solo cross-subject dentro de
+      cada dataset**. Con ello desaparece la necesidad del remuestreo a fs común y la
+      armonización de montajes para entrenar. El script `train_eegnet_crossdataset.py` ya se
+      eliminó. (El trabajo de remuestreo LTI de `docs/remuestreo.md` queda como material
+      didáctico de Sistemas Lineales, no como pieza del entrenamiento.)
 
 - Refs: `pipeline/training.py` (`train_eegnet_pooled`, `_eegnet_features`),
   `scripts/train_eegnet_pooled.py`, `scripts/compare_methods.py`.
@@ -273,19 +267,12 @@ esfera/scalp, con heatmap cortical en GPU.
       Pendiente (ampliación): detectar términos en CUALQUIER texto/sección, no solo en los
       chips de ayuda.
 
-## Simulador de señal ("creador de señal")
+## Simulador de señal ("creador de señal") — CANCELADO (2026-06-26)
 
-> **Decidido (decisión "ambas cosas"):** además de la *leyenda honesta sobre datos reales*
-> (ver sección Modelo), construir un **simulador sintético** explícitamente didáctico/ficticio.
-
-- [ ] Herramienta que **degrada una señal real** para simular condiciones difíciles:
-      sujeto "iletrado" (ERD débil → atenuar la banda µ/β), cuero cabelludo grueso
-      (atenuación + más ruido), mala colocación de electrodos, etc.
-- [ ] Marcarlo **claramente como simulación**, no como datos reales del dataset.
-- [ ] Mostrar el efecto en cadena: cómo la degradación cambia la señal filtrada, las
-      features CSP y la predicción (conecta con "Laboratorio: el filtro afecta una predicción").
-- **Abierto:** ¿página propia o modo dentro del Laboratorio? ¿Qué parámetros de degradación
-  se exponen al usuario?
+> **CANCELADO (cambio de plan 2026-06-26):** se descarta construir el simulador sintético que
+> degrada una señal real (sujeto "iletrado", cuero cabelludo grueso, mala colocación). Se
+> conserva solo la *leyenda honesta sobre datos reales* ya hecha (ver sección Modelo,
+> `components/ResultInterpretation.tsx`).
 
 ---
 
