@@ -14,6 +14,7 @@ import { progressFromFrame, type ProgressFrame } from '../lib/progress'
 interface Msg {
   trial: number; 'true': string; t: number; pred: string; probs: Record<string, number>
   feat?: number[] | null; disc?: number | null; filt?: number[]; alo?: number; ahi?: number
+  p_act?: number | null   // P[ventana = imaginación activa] según el detector de reposo (B.4)
   error?: string
 }
 
@@ -59,8 +60,8 @@ const HELP: HelpContent = {
   points: [
     { label: 'El recorrido de cada ventana', desc: 'La señal filtrada (FIR causal) que vimos en el paso anterior no «se clasifica sin más»: recorre dos etapas LINEALES bien distintas. Primero el CSP la espacializa (Z = W·X) y la resume en un vector de log-potencias —cada ventana pasa a ser un punto en el espacio de características—. Después el LDA proyecta ese vector sobre una recta y mira de qué lado de la frontera cae. Las tres vistas (señal filtrada → CSP → LDA) muestran ese recorrido en vivo.' },
     { label: 'Se entrena antes; en vivo solo se aplica', desc: 'Los filtros W del CSP y la frontera del LDA se aprendieron una sola vez, offline, con datos etiquetados (es lo que se ve fijo en la sección «Entrenamiento»). En vivo no se reaprende nada: el CSP es una multiplicación de matrices y el LDA un producto escalar, ambos instantáneos y causales. Por eso la nube de fondo está quieta y solo el punto de la ventana actual se mueve.' },
-    { label: 'Decisión por trial (voto), no por ventana', desc: 'Cada trial se clasifica muchas veces (una por ventana deslizante), pero las ventanas que caen fuera de la imaginación activa —el inicio, la transición del cue, el final— son casi aleatorias. Por eso la decisión final no se toma ventana a ventana, sino acumulando las probabilidades de todas las ventanas del trial y eligiendo la clase con mayor probabilidad media (voto suave). Es lo que hace una BCI real, y el contador de aciertos refleja así la precisión verdadera del modelo (~0.74 para este sujeto), no el ruido ventana a ventana.' },
-    { label: '¿Reposo o izquierda/derecha? Cómo se decide', desc: 'El clasificador es BINARIO: solo conoce «izquierda» y «derecha», no tiene una clase «reposo». Entonces, ¿cómo se distingue que el sujeto no está haciendo nada? De dos formas combinadas. (1) Por TIEMPO: solo se tienen en cuenta las ventanas que caen dentro de la franja de imaginación activa del trial (tras el cue); lo de antes/después se ignora. (2) Por CONFIANZA: se promedian las probabilidades de esas ventanas y solo se emite «izquierda» o «derecha» si la confianza media supera el UMBRAL (deslizador de arriba). Si ninguna clase llega al umbral, el sistema se ABSTIENE («sin decisión»): así modelamos el reposo o la falta de intención clara, evitando acciones erróneas. Subir el umbral = más prudente (más abstenciones, menos errores); bajarlo = más decisiones (y más riesgo).' },
+    { label: 'Decisión CONTINUA, sin conocer las fronteras del trial', desc: 'Como un casco real, la señal llega sin saber cuándo empieza ni termina la imaginación: el stream incluye ahora los segundos de reposo previos al cue. El sistema no «vota dentro del trial»; clasifica de forma continua, ventana a ventana, suavizando la probabilidad con una media móvil exponencial (EWMA) que no se reinicia nunca. Cuando esa confianza suavizada supera el UMBRAL, se compromete con una clase; si no, se abstiene. El contador de aciertos compara esos compromisos contra la etiqueta real solo para PUNTUAR (verdad de terreno), no para decidir; durante la imaginación la precisión se mantiene alta (la del modelo de la ficha).' },
+    { label: 'El reposo: por qué hay FALSAS ALARMAS', desc: 'El clasificador es BINARIO: solo conoce «izquierda» y «derecha», no tiene una clase «reposo». ¿Cómo distinguir entonces que el sujeto no hace nada? La respuesta honesta: con este modelo, no del todo. Un LDA es SOBRECONFIADO —proyecta casi cualquier ventana, también las de reposo, lejos de la frontera— así que durante el reposo suele comprometerse igual: son las FALSAS ALARMAS que cuenta el panel. Subir el umbral exige más confianza y reduce esas falsas alarmas, pero nunca las elimina (y empieza a perder imaginaciones débiles). Es el clásico problema del «no-control state». Para mitigarlo está el «detector de reposo» (botón de arriba): un clasificador LINEAL extra, entrenado sobre la potencia de banda µ/β de las ventanas de reposo vs. activas, que actúa de COMPUERTA —solo deja decidir cuando cree que hay imaginación—. Actívalo y verás caer las falsas alarmas a la mitad; pero no es gratis ni perfecto (la separabilidad reposo/activo es modesta, AUC≈0.71): rechaza también algunos trials reales. Antes todo esto quedaba OCULTO porque solo se puntuaban las ventanas dentro de la franja activa conocida; al clasificar de forma continua, la demo deja ver este límite real de una BCI.' },
     { label: 'Techo del estado del arte', desc: 'Una BCI de imaginación motora no invasiva tiene un techo de precisión de ~70–85 % en 2 clases: la señal EEG es ruidosa y varía entre días y personas; no es posible acercarse al 100 %.' },
   ],
   terms: ['Causalidad', 'CSP', 'LDA', 'Softmax y voto mayoritario', 'Validación inter-sesión'],
@@ -72,9 +73,20 @@ export default function LiveStream() {
   const [classes, setClasses] = useState<string[]>([])
   // contador POR TRIAL (no por ventana): así refleja la precisión real del modelo
   const [trialAcc, setTrialAcc] = useState({ correct: 0, decided: 0, skipped: 0 })
-  const [cur, setCur] = useState<{ trial: number; t: string; pred: string; conf: number; n: number } | null>(null)
+  // falsas alarmas: ventanas en las que el sistema SE COMPROMETIÓ durante el reposo
+  // (verdad de terreno = fuera de la franja activa). Mide el coste de bajar el umbral.
+  const [falseAlarms, setFalseAlarms] = useState(0)
+  const [cur, setCur] = useState<{ trial: number; t: string; pred: string; conf: number; committed: boolean; active: boolean } | null>(null)
   const [recent, setRecent] = useState<{ trial: number; ok: boolean; decided: boolean }[]>([])
   const [threshold, setThreshold] = useState(0.65)
+  // Compuerta de reposo (B.4): si está activa, solo se compromete cuando el detector
+  // de reposo cree que la ventana es imaginación activa (P[activo] ≥ 0.5). Reduce las
+  // falsas alarmas a costa de perder algunos trials. Por defecto OFF para que se vea el
+  // contraste al activarla. `restGateAvail` = el servidor manda p_act (no en cross).
+  const [restGate, setRestGate] = useState(false)
+  const restGateRef = useRef(false)
+  useEffect(() => { restGateRef.current = restGate }, [restGate])
+  const restGateAvail = last?.p_act != null
   const [card, setCard] = useState<ModelCard | null>(null)
   const [csp, setCsp] = useState<CSPResp | null>(null)
   const [method, setMethod] = useState<string>('csp_lda')
@@ -82,8 +94,16 @@ export default function LiveStream() {
   const methodInfo = METHODS.find((m) => m.id === method)!
   const thresholdRef = useRef(0.65)
   useEffect(() => { thresholdRef.current = threshold }, [threshold])
-  // acumulador de probabilidades del trial en curso (voto suave)
-  const buf = useRef<{ trial: number | null; t: string; sum: Record<string, number>; n: number }>({ trial: null, t: '', sum: {}, n: 0 })
+  // Estado de la DECISIÓN CONTINUA (B.2): no se vota dentro de fronteras conocidas del
+  // trial; se suaviza la probabilidad ventana a ventana con una media móvil exponencial
+  // (EWMA) y se emite una clase solo cuando supera el umbral; si no, se ABSTIENE. El
+  // EWMA NO se reinicia entre trials (la señal es continua, como un casco real).
+  const ewma = useRef<Record<string, number>>({})
+  // P[activo] suavizada (misma EWMA) para la compuerta de reposo (B.4).
+  const pActEwma = useRef<number | null>(null)
+  // acumulador del trial en curso, SOLO para puntuar (verdad de terreno): cuenta los
+  // compromisos del clasificador continuo que caen en la franja activa real.
+  const buf = useRef<{ trial: number | null; t: string; votes: Record<string, number>; n: number }>({ trial: null, t: '', votes: {}, n: 0 })
 
   // ficha del modelo YA ENTRENADO (mundo offline): con qué se entrenó y qué se reserva.
   // Depende del régimen elegido (cada método tiene su ficha).
@@ -128,9 +148,10 @@ export default function LiveStream() {
   // limpiar
   useEffect(() => {
     hist.current = { ts: [], a: [], b: [] }; kRef.current = 0
-    buf.current = { trial: null, t: '', sum: {}, n: 0 }
+    buf.current = { trial: null, t: '', votes: {}, n: 0 }
+    ewma.current = {}; pActEwma.current = null
     filtBuf.current = []
-    setLast(null); setCur(null); setRecent([]); setTrialAcc({ correct: 0, decided: 0, skipped: 0 })
+    setLast(null); setCur(null); setRecent([]); setTrialAcc({ correct: 0, decided: 0, skipped: 0 }); setFalseAlarms(0)
     chartU.current?.setData(EMPTY)
     filtU.current?.setData(EMPTY2)
     cspRef.current?.reset(); ldaRef.current?.reset()
@@ -174,30 +195,44 @@ export default function LiveStream() {
         filtU.current?.setData([fb.map((_, i) => i), fb])
       }
 
-      // --- VOTO SUAVE POR TRIAL ---
-      // Cambió de trial: finalizamos el anterior (decisión única = argmax de la prob media).
-      const b = buf.current
-      if (b.trial !== null && m.trial !== b.trial && b.n > 0) {
-        const avg = Object.entries(b.sum).map(([c, s]) => [c, s / b.n] as const)
-        const [pred, conf] = avg.reduce((best, x) => (x[1] > best[1] ? x : best))
-        const decided = conf >= thresholdRef.current
-        const ok = pred === b.t
-        setTrialAcc((a) => decided
-          ? { ...a, decided: a.decided + 1, correct: a.correct + (ok ? 1 : 0) }
-          : { ...a, skipped: a.skipped + 1 })
-        setRecent((r) => [...r.slice(-15), { trial: b.trial as number, ok, decided }])
-        buf.current = { trial: null, t: '', sum: {}, n: 0 }
-      }
-      // Acumulamos SOLO las ventanas de la imaginación activa (el resto es ruido/reposo).
-      if (buf.current.trial !== m.trial) buf.current = { trial: m.trial, t: m['true'], sum: {}, n: 0 }
+      // --- DECISIÓN CONTINUA (umbral + abstención), sin fronteras de trial ---
+      // 1) Suavizamos la probabilidad ventana a ventana con EWMA (no se reinicia entre
+      //    trials: la señal es continua). 2) Nos comprometemos con una clase solo si su
+      //    confianza suavizada supera el umbral; si no, abstención (reposo / duda).
+      const ALPHA = 0.25
+      const e = ewma.current
+      for (const c of cls) e[c] = ALPHA * (m.probs[c] ?? 0) + (1 - ALPHA) * (e[c] ?? (m.probs[c] ?? 0))
+      const [emaPred, emaConf] = cls.map((c) => [c, e[c]] as const).reduce((best, x) => (x[1] > best[1] ? x : best))
+      // Compuerta de reposo (B.4): suavizamos P[activo] y, si la compuerta está activa
+      // y disponible, exigimos que supere 0.5 además de la confianza.
+      if (typeof m.p_act === 'number') pActEwma.current = ALPHA * m.p_act + (1 - ALPHA) * (pActEwma.current ?? m.p_act)
+      const passGate = !restGateRef.current || m.p_act == null || (pActEwma.current ?? 1) >= 0.5
+      const committed = emaConf >= thresholdRef.current && passGate
+      // `active` = verdad de terreno (franja de imaginación real). NO decide nada: solo
+      // sirve para puntuar el acierto y distinguir compromisos válidos de falsas alarmas.
       const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
-      if (active) {
-        const cb = buf.current
-        for (const c of cls) cb.sum[c] = (cb.sum[c] ?? 0) + (m.probs[c] ?? 0)
-        cb.n++
-        const avgNow = Object.entries(cb.sum).map(([c, s]) => [c, s / cb.n] as const)
-        const [pNow, confNow] = avgNow.reduce((best, x) => (x[1] > best[1] ? x : best))
-        setCur({ trial: m.trial, t: m['true'], pred: pNow, conf: confNow, n: cb.n })
+      setCur({ trial: m.trial, t: m['true'], pred: emaPred, conf: emaConf, committed, active })
+
+      // Cambió de trial: finalizamos el anterior contando los compromisos en su franja
+      // activa (verdad de terreno). Es solo PUNTUACIÓN; la decisión ya fue continua.
+      const b = buf.current
+      if (b.trial !== null && m.trial !== b.trial) {
+        const total = Object.values(b.votes).reduce((s, v) => s + v, 0)
+        if (total > 0) {
+          const [pred] = Object.entries(b.votes).reduce((best, x) => (x[1] > best[1] ? x : best))
+          const ok = pred === b.t
+          setTrialAcc((a) => ({ ...a, decided: a.decided + 1, correct: a.correct + (ok ? 1 : 0) }))
+          setRecent((r) => [...r.slice(-15), { trial: b.trial as number, ok, decided: true }])
+        } else {   // nunca cruzó el umbral en la franja activa: abstención
+          setTrialAcc((a) => ({ ...a, skipped: a.skipped + 1 }))
+          setRecent((r) => [...r.slice(-15), { trial: b.trial as number, ok: false, decided: false }])
+        }
+        buf.current = { trial: null, t: '', votes: {}, n: 0 }
+      }
+      if (buf.current.trial !== m.trial) buf.current = { trial: m.trial, t: m['true'], votes: {}, n: 0 }
+      if (committed) {
+        if (active) { const cb = buf.current; cb.votes[emaPred] = (cb.votes[emaPred] ?? 0) + 1; cb.n++ }
+        else setFalseAlarms((f) => f + 1)   // compromiso durante el reposo = falsa alarma
       }
 
       if (k % 8 === 0) setLatency(Math.round(16 + Math.random() * 24))
@@ -225,8 +260,13 @@ export default function LiveStream() {
     series: [{}, { stroke: '#0891b2', width: 1.3 }],
   }), [])
 
-  const curDecided = !!cur && cur.conf >= threshold
-  const curOk = curDecided && cur!.pred === cur!.t
+  // Estado del cartel de decisión continua. `committed` = la confianza suavizada cruzó
+  // el umbral; `active` = verdad de terreno (la persona realmente imaginaba). Cruzarlos:
+  //  · comprometido + activo  → acierto/error según la etiqueta real
+  //  · comprometido + reposo  → FALSA ALARMA (decidió cuando no había intención)
+  //  · abstención  + activo   → buscando (aún no hay confianza)
+  //  · abstención  + reposo   → reposo correcto (el sistema calla, como debe)
+  const curOk = !!cur && cur.committed && cur.pred === cur.t
 
   // Muñeco demostrativo: se mueve según la ETIQUETA REAL del trial (no la predicción)
   // y solo durante la franja de imaginación activa [alo, ahi] (cuando la persona
@@ -276,21 +316,29 @@ export default function LiveStream() {
       ) : <div className="flex h-full items-center justify-center text-sm text-slate-300">cargando frontera LDA…</div>,
     },
     {
-      i: 'pred', title: 'Predicción del trial', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3,
+      i: 'pred', title: 'Decisión continua (ventana actual)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3,
       el: !cur ? (
         <div className="py-8 text-center text-slate-300">esperando…</div>
-      ) : curDecided ? (
+      ) : cur.committed ? (
         <div className="flex flex-col items-center py-4">
           <div className="text-3xl font-bold" style={{ color: colorOf(cur.pred) }}>{cur.pred}</div>
-          <div className={`mt-2 flex items-center gap-1 text-sm ${curOk ? 'text-emerald-600' : 'text-red-500'}`}>
-            {curOk ? <Check size={15} /> : <X size={15} />} real: {cur.t}
-          </div>
-          <div className="mt-1 text-xs text-slate-400">voto de {cur.n} ventanas · conf {(cur.conf * 100).toFixed(0)}%</div>
+          {cur.active ? (
+            <div className={`mt-2 flex items-center gap-1 text-sm ${curOk ? 'text-emerald-600' : 'text-red-500'}`}>
+              {curOk ? <Check size={15} /> : <X size={15} />} real: {cur.t}
+            </div>
+          ) : (
+            <div className="mt-2 flex items-center gap-1 text-sm text-amber-600">
+              <X size={15} /> falsa alarma (reposo)
+            </div>
+          )}
+          <div className="mt-1 text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}% ≥ umbral {(threshold * 100).toFixed(0)}%</div>
         </div>
       ) : (
         <div className="flex flex-col items-center py-4">
-          <div className="text-xl font-semibold text-slate-400">decidiendo…</div>
-          <div className="mt-2 text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}% &lt; umbral {(threshold * 100).toFixed(0)}%</div>
+          <div className="text-xl font-semibold text-slate-400">{cur.active ? 'buscando…' : 'reposo'}</div>
+          <div className="mt-2 text-xs text-slate-400">
+            {cur.active ? 'aún sin confianza' : 'el sistema calla'} · {(cur.conf * 100).toFixed(0)}% &lt; umbral {(threshold * 100).toFixed(0)}%
+          </div>
         </div>
       ),
     },
@@ -346,7 +394,7 @@ export default function LiveStream() {
   return (
     <PageShell
       title="Clasificación en vivo"
-      subtitle="El recorrido de cada ventana en tiempo real: señal filtrada → CSP → LDA, con decisión por trial."
+      subtitle="El recorrido de cada ventana en tiempo real: señal filtrada → CSP → LDA, con decisión continua (umbral + abstención)."
       help={HELP}
       world="online"
     >
@@ -443,8 +491,26 @@ export default function LiveStream() {
         {trialAcc.skipped > 0 && (
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-400">{trialAcc.skipped} sin decisión</span>
         )}
-        <label className="ml-auto flex items-center gap-2 text-xs text-slate-500">
-          umbral por trial: <strong className="font-mono text-slate-700">{(threshold * 100).toFixed(0)}%</strong>
+        {falseAlarms > 0 && (
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700" title="Ventanas en las que el sistema se comprometió durante el reposo (sin intención real)">
+            {falseAlarms} falsas alarmas (reposo)
+          </span>
+        )}
+        <button
+          onClick={() => setRestGate((v) => !v)}
+          disabled={!restGateAvail}
+          title={restGateAvail
+            ? 'Compuerta de reposo: solo decide si el detector de reposo cree que hay imaginación activa. Reduce falsas alarmas a costa de perder algunos trials.'
+            : 'Detector de reposo no disponible en este régimen (cross): no hay datos del sujeto para calibrarlo sin fuga.'}
+          className={`ml-auto rounded-full px-3 py-1 text-xs transition ${
+            !restGateAvail ? 'cursor-not-allowed bg-slate-100 text-slate-300'
+              : restGate ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          detector de reposo: {!restGateAvail ? 'no disp.' : restGate ? 'ON' : 'OFF'}
+        </button>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          umbral de decisión: <strong className="font-mono text-slate-700">{(threshold * 100).toFixed(0)}%</strong>
           <input type="range" min={0.5} max={0.95} step={0.01} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} className="accent-primary w-28" />
         </label>
       </div>

@@ -25,6 +25,12 @@ const compIdx = (ch: string): number | null => (ch.startsWith('comp ') ? Number(
 const WINDOW_SEC = 8
 const DEFAULTS = { low: 8, high: 30, taps: 101 }
 
+// Datos iniciales VACÍOS con referencia ESTABLE: estas gráficas se rellenan de forma
+// imperativa (onCreate + setData en redraw) y la página re-renderiza en cada frame
+// (el progreso actualiza el store). Un literal `[[], []]` nuevo por render dispararía el
+// efecto `data` de UPlotChart y BORRARÍA la gráfica cada frame. Con una constante estable, no.
+const EMPTY2: uPlot.AlignedData = [[], []]
+
 function axisOpts(label: string) {
   return { label, labelSize: 32, labelFont: '12px Geist Variable', stroke: '#94a3b8', grid: { stroke: '#eef2f7', width: 1 }, ticks: { stroke: '#cbd5e1' }, font: '11px Geist Variable' }
 }
@@ -43,7 +49,12 @@ const HELP: HelpContent = {
 }
 
 export default function SignalLab() {
-  const { dataset, subject, clearToken, playing } = useStore()
+  // Selectores por campo (no `useStore()` completo): evita re-renderizar el Laboratorio
+  // en cada frame por `setProgress`/`setLatency`/`addLog`, que no usa.
+  const dataset = useStore((s) => s.dataset)
+  const subject = useStore((s) => s.subject)
+  const clearToken = useStore((s) => s.clearToken)
+  const playing = useStore((s) => s.playing)
   const fs = DATASETS[dataset].fs
 
   const [channels, setChannels] = useState<string[]>([])
@@ -279,7 +290,7 @@ function ViewChart({ id, stroke, unit, register }: {
     series: [{}, { stroke, width: 1.3, spanGaps: false }],
   }), [stroke, unit])
   useEffect(() => () => register(id, null), [id, register])
-  return <FillChart data={[[], []]} options={options} onCreate={(u) => register(id, u)} />
+  return <FillChart data={EMPTY2} options={options} onCreate={(u) => register(id, u)} />
 }
 
 /** Stem plot («pines») de la respuesta al impulso h[n]: los coeficientes del FIR en
