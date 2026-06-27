@@ -374,18 +374,6 @@ export default function LiveStream() {
       ),
     },
     {
-      i: 'classes', title: 'Clases', accent: 'metric', w: 4, h: 4, minW: 2, minH: 3,
-      el: (
-        <div className="space-y-2 py-2 text-sm text-slate-600">
-          {classes.map((cls) => (
-            <div key={cls} className="flex items-center gap-2">
-              <span className="inline-block h-3 w-5 rounded" style={{ background: colorOf(cls) }} /> {cls}
-            </div>
-          ))}
-        </div>
-      ),
-    },
-    {
       i: 'evolution', title: 'Evolución de la confianza (últimas ventanas)', accent: 'signal', w: 12, h: 5, minW: 4, minH: 3,
       el: <FillChart data={EMPTY} options={chartOptions} onCreate={(u) => (chartU.current = u)} />,
     },
@@ -526,7 +514,7 @@ export default function LiveStream() {
         </div>
       )}
 
-      <GridBoard widgets={widgets} storageKey="liveLayout-v2" />
+      <GridBoard widgets={widgets} storageKey="liveLayout-v3" />
     </PageShell>
   )
 }
