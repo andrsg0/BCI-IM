@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
+  createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react'
 import type uPlot from 'uplot'
 import { Radio, Check, X, Plus } from 'lucide-react'
@@ -11,6 +11,7 @@ import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
+import { CLASS_COLORS, classColor, STAGE_COLORS, OUTCOME_COLORS, divergingColor } from '../lib/color'
 
 const HELP: HelpContent = {
   pipeline: 'Un panel libre que armas tú mismo',
@@ -22,12 +23,10 @@ const HELP: HelpContent = {
   ],
 }
 
-const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
-
 // ---- bus de datos en vivo (un solo WebSocket para todos los widgets) ----
 interface LiveMsg {
   trial: number; 'true': string; pred: string; probs: Record<string, number>
-  raw?: number[]; filt?: number[]; power?: number[]; alo?: number; ahi?: number; t: number
+  raw?: number[]; filt?: number[]; power?: number[]; disc?: number; alo?: number; ahi?: number; t: number
 }
 const LiveCtx = createContext<{ subscribe: (fn: (m: LiveMsg) => void) => () => void; fs: number; resetKey: string } | null>(null)
 const useLive = () => {
@@ -49,7 +48,11 @@ const CATALOG: CatalogEntry[] = [
   { i: 'conf', title: 'Confianza del clasificador en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Probabilidad de cada clase a lo largo del tiempo.', el: <ConfidenceTrace /> },
   { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Voto suave por trial y aciertos acumulados.', el: <DecisionSummary /> },
   { i: 'prediction', title: 'Predicción en vivo', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Clase predicha ahora mismo y barras de probabilidad.', el: <PredictionLive /> },
+  { i: 'power', title: 'Potencia µ/β por canal', accent: 'brain', w: 5, h: 4, minW: 3, minH: 3, live: true, desc: 'Barras por electrodo (rojo = más potencia, azul = menos).', el: <PowerBars /> },
+  { i: 'disc', title: 'Discriminante LDA en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Proyección sobre el eje de decisión del LDA (signo = clase).', el: <DiscTrace /> },
+  { i: 'confusion', title: 'Matriz de confusión en vivo', accent: 'metric', w: 4, h: 5, minW: 3, minH: 4, live: true, desc: 'Aciertos y confusiones acumulados por trial.', el: <ConfusionMatrix /> },
   { i: 'brain3d', title: 'Cerebro 3D (actividad µ/β)', accent: 'brain', w: 6, h: 6, minW: 4, minH: 5, live: true, desc: 'Cabeza 3D coloreada con la potencia µ/β (tendencia ERD).', el: <BrainWidget /> },
+  { i: 'legend', title: 'Leyenda de colores', accent: 'neutral', w: 4, h: 4, minW: 3, minH: 3, live: false, desc: 'Qué significa cada color en los gráficos del tablero.', el: <ColorLegend /> },
   { i: 'info', title: 'Ficha del dataset', accent: 'neutral', w: 4, h: 4, minW: 3, minH: 3, live: false, desc: 'Resumen estático del dataset y sujeto seleccionados.', el: <DatasetInfoCard /> },
 ]
 
@@ -214,7 +217,7 @@ function SignalTrace({ kind }: { kind: 'raw' | 'filt' }) {
   const opts = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
     legend: { show: false }, cursor: { show: false }, scales: { x: { time: false } },
     axes: [axis('Tiempo (s)'), axis('µV')],
-    series: [{}, { stroke: kind === 'raw' ? '#2563eb' : '#0891b2', width: 1.2 }],
+    series: [{}, { stroke: kind === 'raw' ? STAGE_COLORS.raw : STAGE_COLORS.filt, width: 1.2 }],
   }), [kind])
   return <FillChart data={[[], []]} options={opts} onCreate={(x) => (u.current = x)} />
 }
@@ -235,7 +238,7 @@ function ConfidenceTrace() {
   const opts = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
     legend: { show: false }, cursor: { show: false }, scales: { x: { time: false }, y: { range: [0, 1] } },
     axes: [axis('Tiempo (s)'), axis('probabilidad')],
-    series: [{}, { stroke: '#2563eb', width: 1.6 }, { stroke: '#e11d48', width: 1.6 }],
+    series: [{}, { stroke: CLASS_COLORS[0], width: 1.6 }, { stroke: CLASS_COLORS[1], width: 1.6 }],
   }), [])
   return <FillChart data={[[], [], []]} options={opts} onCreate={(x) => (u.current = x)} />
 }
@@ -245,9 +248,11 @@ function DecisionSummary() {
   const [cur, setCur] = useState<{ pred: string; t: string; conf: number } | null>(null)
   const [acc, setAcc] = useState({ correct: 0, total: 0 })
   const bufRef = useRef<{ trial: number | null; t: string; sum: Record<string, number>; n: number }>({ trial: null, t: '', sum: {}, n: 0 })
+  const classesRef = useRef<string[]>([])
 
   useEffect(() => { bufRef.current = { trial: null, t: '', sum: {}, n: 0 }; setCur(null); setAcc({ correct: 0, total: 0 }) }, [resetKey])
   useEffect(() => subscribe((m) => {
+    classesRef.current = Object.keys(m.probs)
     const b = bufRef.current
     // finalizar trial anterior (voto suave de las ventanas activas)
     if (b.trial !== null && m.trial !== b.trial && b.n > 0) {
@@ -271,8 +276,8 @@ function DecisionSummary() {
   const ok = cur.pred === cur.t
   return (
     <div className="flex h-full flex-col justify-center gap-3 text-center">
-      <div className="text-3xl font-bold" style={{ color: ok ? '#059669' : '#2563eb' }}>{cur.pred}</div>
-      <div className={`flex items-center justify-center gap-1 text-sm ${ok ? 'text-emerald-600' : 'text-red-500'}`}>
+      <div className="text-3xl font-bold" style={{ color: classColor(classesRef.current, cur.pred) }}>{cur.pred}</div>
+      <div className="flex items-center justify-center gap-1 text-sm" style={{ color: ok ? OUTCOME_COLORS.ok : OUTCOME_COLORS.bad }}>
         {ok ? <Check size={15} /> : <X size={15} />} real: {cur.t}
       </div>
       <div className="text-xs text-slate-400">confianza {(cur.conf * 100).toFixed(0)}%</div>
@@ -293,7 +298,7 @@ function PredictionLive() {
   useEffect(() => subscribe(setM), [subscribe])
   if (!m) return <div className="flex h-full items-center justify-center text-center text-sm text-slate-300">Pulsa <strong className="mx-1">Play</strong> para iniciar</div>
   const cls = Object.keys(m.probs)
-  const colorOf = (c: string) => CLASS_COLORS[Math.max(0, cls.indexOf(c)) % CLASS_COLORS.length]
+  const colorOf = (c: string) => classColor(cls, c)
   return (
     <div className="flex h-full flex-col justify-center gap-3">
       <div className="text-center text-3xl font-bold" style={{ color: colorOf(m.pred) }}>{m.pred}</div>
@@ -343,6 +348,143 @@ function BrainWidget() {
   return (
     <div className="h-full min-h-[240px] overflow-hidden rounded-lg">
       <Brain3D channels={pos.channels} pos3d={pos.pos3d} values={values} />
+    </div>
+  )
+}
+
+// ---- Potencia µ/β por canal (barras divergentes vs. media espacial) ----
+function PowerBars() {
+  const { subscribe, resetKey } = useLive()
+  const { dataset, subject } = useStore()
+  const [channels, setChannels] = useState<string[]>([])
+  const [power, setPower] = useState<number[]>([])
+  useEffect(() => {
+    setChannels([]); setPower([])
+    getJSON<PosResp>(`/positions?dataset=${dataset}&subject=${subject}`)
+      .then((p) => setChannels(p.channels)).catch(() => setChannels([]))
+  }, [dataset, subject])
+  useEffect(() => { setPower([]) }, [resetKey])
+  useEffect(() => subscribe((m) => { if (m.power) setPower(m.power) }), [subscribe])
+  if (!power.length) return <div className="flex h-full items-center justify-center text-center text-sm text-slate-300">Pulsa <strong className="mx-1">Play</strong> para iniciar</div>
+  const mean = power.reduce((a, b) => a + b, 0) / power.length
+  const dev = power.map((p) => p - mean)
+  const maxAbs = Math.max(...dev.map(Math.abs), 1e-9)
+  return (
+    <div className="flex h-full flex-col justify-center gap-1 overflow-auto">
+      {dev.map((d, i) => (
+        <div key={i} className="flex items-center gap-2 text-[11px]">
+          <span className="w-9 shrink-0 text-right text-slate-500">{channels[i] ?? `#${i}`}</span>
+          <div className="relative h-3 flex-1 rounded bg-slate-100">
+            <div className="absolute bottom-0 left-1/2 top-0 w-px bg-slate-300" />
+            <div className="absolute bottom-0 top-0 rounded" style={{ background: divergingColor(d / maxAbs), width: `${(Math.abs(d) / maxAbs) * 50}%`, left: d < 0 ? `${50 - (Math.abs(d) / maxAbs) * 50}%` : '50%' }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---- Discriminante LDA en el tiempo (proyección 1D sobre el eje de decisión) ----
+function DiscTrace() {
+  const { subscribe, resetKey } = useLive()
+  const u = useRef<uPlot | null>(null)
+  const buf = useRef<{ t: number[]; d: number[] }>({ t: [], d: [] })
+  const k = useRef(0)
+  useEffect(() => { buf.current = { t: [], d: [] }; k.current = 0; u.current?.setData([[], []]) }, [resetKey])
+  useEffect(() => subscribe((m) => {
+    if (m.disc == null) return
+    const h = buf.current
+    h.t.push(k.current * 0.1); h.d.push(m.disc); k.current++
+    if (h.t.length > 250) { h.t.shift(); h.d.shift() }
+    u.current?.setData([h.t, h.d])
+  }), [subscribe])
+  const opts = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
+    legend: { show: false }, cursor: { show: false }, scales: { x: { time: false } },
+    axes: [axis('Tiempo (s)'), axis('proyección')],
+    series: [{}, { stroke: STAGE_COLORS.disc, width: 1.6 }],
+  }), [])
+  return <FillChart data={[[], []]} options={opts} onCreate={(x) => (u.current = x)} />
+}
+
+// ---- Matriz de confusión en vivo (voto suave por trial) ----
+function ConfusionMatrix() {
+  const { subscribe, resetKey } = useLive()
+  const [classes, setClasses] = useState<string[]>([])
+  const [mat, setMat] = useState<number[][]>([])
+  const buf = useRef<{ trial: number | null; t: string; sum: Record<string, number>; n: number }>({ trial: null, t: '', sum: {}, n: 0 })
+  const clsRef = useRef<string[]>([])
+  useEffect(() => { buf.current = { trial: null, t: '', sum: {}, n: 0 }; clsRef.current = []; setClasses([]); setMat([]) }, [resetKey])
+  useEffect(() => subscribe((m) => {
+    const ks = Object.keys(m.probs)
+    if (clsRef.current.length !== ks.length) { clsRef.current = ks; setClasses(ks); setMat(ks.map(() => ks.map(() => 0))) }
+    const b = buf.current
+    if (b.trial !== null && m.trial !== b.trial && b.n > 0) {
+      const [pred] = Object.entries(b.sum).reduce((best, x) => (x[1] > best[1] ? x : best))
+      const ti = clsRef.current.indexOf(b.t), pi = clsRef.current.indexOf(pred)
+      if (ti >= 0 && pi >= 0) setMat((prev) => { const c = prev.map((r) => r.slice()); c[ti][pi]++; return c })
+      buf.current = { trial: null, t: '', sum: {}, n: 0 }
+    }
+    if (buf.current.trial !== m.trial) buf.current = { trial: m.trial, t: m['true'], sum: {}, n: 0 }
+    const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
+    if (active) { const cb = buf.current; for (const c of Object.keys(m.probs)) cb.sum[c] = (cb.sum[c] ?? 0) + m.probs[c]; cb.n++ }
+  }), [subscribe])
+
+  if (!classes.length || !mat.length) return <div className="flex h-full items-center justify-center text-center text-sm text-slate-300">Pulsa <strong className="mx-1">Play</strong> para iniciar</div>
+  const total = mat.flat().reduce((a, b) => a + b, 0)
+  const maxV = Math.max(...mat.flat(), 1)
+  const short = (c: string) => c.replace(/_/g, ' ')
+  return (
+    <div className="flex h-full flex-col gap-2 text-[11px]">
+      <div className="text-slate-400">filas = real · columnas = predicho · n={total}</div>
+      <div className="grid flex-1 items-center gap-0.5" style={{ gridTemplateColumns: `auto repeat(${classes.length}, 1fr)` }}>
+        <div />
+        {classes.map((c) => (
+          <div key={c} className="truncate px-1 text-center font-medium" style={{ color: classColor(classes, c) }}>{short(c)}</div>
+        ))}
+        {classes.map((rc, ri) => (
+          <Fragment key={rc}>
+            <div className="truncate pr-1 text-right font-medium" style={{ color: classColor(classes, rc) }}>{short(rc)}</div>
+            {classes.map((_, ci) => {
+              const v = mat[ri][ci]; const correct = ri === ci; const alpha = v / maxV
+              const rgb = correct ? '5,150,105' : '225,29,72'
+              return (
+                <div key={ci} className="flex items-center justify-center rounded py-2 tabular-nums" style={{ background: `rgba(${rgb},${0.1 + 0.6 * alpha})`, color: alpha > 0.55 ? '#fff' : '#334155' }}>{v}</div>
+              )
+            })}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---- Leyenda de colores (estática): qué significa cada color del tablero ----
+function ColorLegend() {
+  const Swatch = ({ color, label }: { color: string; label: string }) => (
+    <div className="flex items-center gap-2">
+      <span className="inline-block h-3 w-3 shrink-0 rounded" style={{ background: color }} />
+      <span className="text-slate-600">{label}</span>
+    </div>
+  )
+  return (
+    <div className="flex h-full flex-col justify-center gap-3 text-xs">
+      <div className="space-y-1">
+        <div className="font-medium text-slate-500">Clases (lo que se predice)</div>
+        <Swatch color={CLASS_COLORS[0]} label="1ª clase" />
+        <Swatch color={CLASS_COLORS[1]} label="2ª clase" />
+      </div>
+      <div className="space-y-1">
+        <div className="font-medium text-slate-500">Etapas de la señal</div>
+        <Swatch color={STAGE_COLORS.raw} label="cruda (sin filtrar)" />
+        <Swatch color={STAGE_COLORS.filt} label="filtrada µ/β" />
+        <Swatch color={STAGE_COLORS.disc} label="discriminante LDA" />
+      </div>
+      <div className="space-y-1">
+        <div className="font-medium text-slate-500">Resultado</div>
+        <Swatch color={OUTCOME_COLORS.ok} label="acierto" />
+        <Swatch color={OUTCOME_COLORS.bad} label="error" />
+      </div>
+      <p className="text-[11px] leading-snug text-slate-400">Cerebro 3D y potencia: rojo = más µ/β, azul = menos.</p>
     </div>
   )
 }

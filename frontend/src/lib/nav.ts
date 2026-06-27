@@ -66,9 +66,14 @@ export const WORLD_STYLE: Record<World, { dot: string; chip: string }> = {
 // Lista plana (compatibilidad / usos puntuales).
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
+// Rutas que, aunque figuren en el grupo «general» del nav (por ubicación), son
+// tableros EN VIVO: necesitan los controles de reproducción (Play) del panel lateral.
+const LIVE_OVERRIDE = new Set(['/dashboard'])
+
 /** Mundo al que pertenece una ruta (para que el panel lateral sepa si está en una
  *  sección «en vivo» u «offline»). Rutas desconocidas → 'general'. */
 export function worldForPath(pathname: string): World {
+  if (LIVE_OVERRIDE.has(pathname)) return 'online'
   for (const g of NAV_GROUPS) {
     if (g.items.some((it) => it.path === pathname)) return g.world
   }

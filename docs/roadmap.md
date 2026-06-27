@@ -177,6 +177,16 @@ esfera/scalp, con heatmap cortical en GPU.
   - **Resuelto (era abierto):** se eligió **catálogo fijo** (declarado en `Dashboard.tsx` como
     `CATALOG`), no registro automático desde cada página — más simple y sin acoplar las páginas a
     un registro global. Añadir un panel nuevo = una entrada en `CATALOG`.
+  - **Fix (2026-06-26):** el Dashboard NO permitía pulsar Play (el panel lateral solo activa
+    Reproducción en mundo `online`, y `/dashboard` estaba en el grupo `general` del nav). Resuelto
+    con `LIVE_OVERRIDE` en `worldForPath` (`lib/nav.ts`): `/dashboard` cuenta como `online` para
+    los controles de reproducción sin moverlo de sitio en el nav.
+  - **Más paneles (2026-06-26):** añadidos al catálogo: potencia µ/β por canal (barras),
+    discriminante LDA en el tiempo, matriz de confusión en vivo, y leyenda de colores (estática).
+  - **Código de color unificado (2026-06-26):** fuente única en `lib/color.ts` (`CLASS_COLORS`,
+    `classColor`, `STAGE_COLORS`, `OUTCOME_COLORS`): un color significa siempre lo mismo — clase
+    (azul=1ª, rojo=2ª…), etapa de señal (cruda=gris, filtrada=cian, discriminante=violeta) y
+    acierto/error (verde/rojo, solo iconos). Aplicado a todos los gráficos del Dashboard.
 
 ## Modelo (antes "Entrenamiento")
 

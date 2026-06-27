@@ -130,7 +130,7 @@ export function Sidebar() {
           <p className="text-[11px] text-slate-400">
             {liveMode
               ? 'La reproducción afecta solo a la página actual.'
-              : 'Los controles de reproducción se activan en las secciones «En vivo» (Laboratorio, Clasificación, Cerebro 3D).'}
+              : 'Los controles de reproducción se activan en las secciones «En vivo» (Dashboard, Laboratorio, Clasificación, Cerebro 3D).'}
           </p>
         </section>
 
