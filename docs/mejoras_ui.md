@@ -150,17 +150,18 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 
 ## Laboratorio
 
-- [ ] Cambiar texto: "detenido — pulsa Play" → "detenido".
+- [x] Cambiar texto: "detenido — pulsa Play" → "detenido".
 
 ---
 
 ## Clasificación
 
-- [ ] Cambiar textos:
-  - [ ] "Modelo ya entrenado (antes del streaming)" → "Modelo"
-  - [ ] "esperando primer trial…" → borrar.
-- [ ] Cambiar el color del tag "Modelo" a azul.
-- [ ] Eliminar el texto: "Los paneles ya están montados (el espacio CSP y la frontera LDA
+- [x] Cambiar textos:
+  - [x] "Modelo ya entrenado (antes del streaming)" → "Modelo"
+  - [x] "esperando primer trial…" → borrar.
+- [x] Cambiar el color del tag "Modelo" a azul. → Banner del modelo recoloreado a azul
+  (border/bg/text blue).
+- [x] Eliminar el texto: "Los paneles ya están montados (el espacio CSP y la frontera LDA
   muestran el modelo entrenado). Pulsa Play en el panel lateral para que empiece a llegar
   la señal."
 - [ ] Aclarar si el "umbral de decisión" es necesario aquí (el clasificador ya está

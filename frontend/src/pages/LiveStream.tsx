@@ -422,9 +422,9 @@ export default function LiveStream() {
       )}
 
       {card && (
-        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5 text-xs text-amber-900">
+        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-2.5 text-xs text-blue-900">
           <span className="flex items-center gap-1.5 font-semibold">
-            <Database size={14} /> Modelo ya entrenado (antes del streaming)
+            <Database size={14} /> Modelo
           </span>
           {card.holdout.by === 'subject' ? (
             <>
@@ -480,13 +480,11 @@ export default function LiveStream() {
           <Radio size={14} className={playing ? 'animate-pulse' : ''} /> {playing ? 'EN VIVO' : 'detenido'}
         </span>
         {cur && <span className="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs text-slate-600">trial {cur.trial}</span>}
-        {trialAcc.decided > 0 ? (
+        {trialAcc.decided > 0 && (
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
             aciertos por trial: <strong>{((trialAcc.correct / trialAcc.decided) * 100).toFixed(0)}%</strong>
             {' '}({trialAcc.correct} aciertos / {trialAcc.decided - trialAcc.correct} fallos)
           </span>
-        ) : (
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-400">esperando primer trial…</span>
         )}
         {trialAcc.skipped > 0 && (
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-400">{trialAcc.skipped} sin decisión</span>
@@ -529,12 +527,6 @@ export default function LiveStream() {
         </div>
       )}
 
-      {!playing && !cur && (
-        <div className="mb-4 rounded-lg border border-dashed border-slate-300 bg-white/60 px-4 py-2.5 text-center text-sm text-slate-400">
-          Los paneles ya están montados (el espacio CSP y la frontera LDA muestran el modelo entrenado).
-          Pulsa <strong>Play</strong> en el panel lateral para que empiece a llegar la señal.
-        </div>
-      )}
       <GridBoard widgets={widgets} storageKey="liveLayout-v2" />
     </PageShell>
   )
