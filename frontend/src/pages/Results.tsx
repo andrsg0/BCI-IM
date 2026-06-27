@@ -360,6 +360,45 @@ const METRIC_LABEL: Record<Metric, string> = {
   eegnet_cross_acc: 'EEGNet cross',
 }
 
+/** Estadísticos de dispersión de una métrica entre sujetos (ignora nulos).
+ *  σ muestral (ddof=1): la convención de los papers para "media ± σ". */
+function metricStats(raw: (number | null | undefined)[]) {
+  const a = raw.filter((v): v is number => typeof v === 'number').sort((x, y) => x - y)
+  const n = a.length
+  if (n === 0) return null
+  const mean = a.reduce((s, v) => s + v, 0) / n
+  const median = n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2
+  const std = n > 1 ? Math.sqrt(a.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1)) : 0
+  return { n, mean, median, std, min: a[0], max: a[n - 1] }
+}
+
+/** Resumen estadístico de la métrica seleccionada entre los sujetos del dataset.
+ *  Complementa el min–max y el Gini con media ± σ y mediana (robusta al sesgo por
+ *  «BCI illiteracy»). Se calcula en el cliente desde los datos por sujeto. */
+function MetricStats({ r, metric }: { r: DatasetResult; metric: Metric }) {
+  const stats = useMemo(
+    () => metricStats((r.subjects ?? []).map((s) => s[metric] as number | null)),
+    [r.subjects, metric],
+  )
+  if (!stats) return null
+  const items: { label: string; v: string; hint?: string }[] = [
+    { label: 'media ± σ', v: `${pct(stats.mean)} ± ${(stats.std * 100).toFixed(1)} pp`, hint: 'σ muestral, en puntos porcentuales' },
+    { label: 'mediana', v: pct(stats.median), hint: 'robusta a sujetos cerca del azar' },
+    { label: 'rango', v: `${pct(stats.min)}–${pct(stats.max)}` },
+    { label: 'n', v: String(stats.n), hint: 'sujetos con esta métrica' },
+  ]
+  return (
+    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-baseline gap-1.5" title={it.hint}>
+          <span className="text-slate-400">{it.label}</span>
+          <span className="font-medium tabular-nums text-slate-700">{it.v}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function SubjectChart({ r, metric, onPick, selected }: {
   r: DatasetResult
   metric: Metric
@@ -724,6 +763,7 @@ export default function Results() {
                   }
                 >
                   <SubjectChart r={detail} metric={metric} onPick={setSubject} selected={subject} />
+                  <MetricStats r={detail} metric={metric} />
                   <div className="mt-4">
                     <SubjectTable r={detail} selected={subject} onPick={setSubject} />
                   </div>
