@@ -149,8 +149,13 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
   comparación y rendimiento" reúne Azar/clases/T, Wilcoxon within/cross y Gini.
 - [x] En el gráfico "Accuracy vs κ (kappa de Cohen)", la leyenda del eje X se solapa con la
   leyenda de colores de los puntos. Separarlas. → Leyenda movida arriba (verticalAlign top).
-- [ ] Aclarar por qué solo el dataset 2a tiene "pooled" (¿es por tiempo de cómputo en el
-  resto?). **(pendiente: definir)**.
+- [x] Aclarar por qué solo el dataset 2a tiene "pooled" (¿es por tiempo de cómputo en el
+  resto?). → Sí, es coste de cómputo + paso manual. El pooled NO lo entrena
+  `train_all_regimes.py` (solo within/cross); requiere correr aparte
+  `scripts/train_eegnet_pooled.py`, que hace LOSO completo (N entrenamientos de EEGNet,
+  cada uno con N−1 sujetos) = lo más caro. Solo se ha ejecutado para 2a; 2b/Kumar no
+  tienen `model_<ds>_s0_eegnet_pooled.json` en disco. No es limitación de código: se puede
+  generar con ese script (usar `--loso-subset` en Kumar para acotar tiempo).
 - [ ] **Falta definir:** qué cambios hacer a la sección desplegable "cómo interpretar estos
   números" (¿debería ir en el icono `?`?). **(pendiente)**.
 

@@ -361,15 +361,6 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
             <p>Pooled por sujeto sobre {a.n_datasets} datasets evaluados · azar 50% · n = nº de sujetos.</p>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                Significancia · Wilcoxon pareado (CSP+LDA vs EEGNet)
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <WilcoxonStat label="Within" sig={a.significance.within} />
-                <WilcoxonStat label="Cross" sig={a.significance.cross} />
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Dispersión entre sujetos (toda la población)
               </p>
               <DispersionStats summary={a.summary} />
@@ -377,37 +368,49 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
           </div>
         </div>
 
-        {/* Desglose por dataset (honestidad: qué aporta cada uno) */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 text-left uppercase text-slate-400">
-                <th className="px-2 py-1.5">Dataset</th>
-                <th className="px-2 py-1.5">Suj.</th>
-                {cols.map((c) => <th key={c.key} className="px-2 py-1.5">{c.label}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {a.per_dataset.filter((d) => d.n > 0).map((d) => (
-                <tr key={d.id} className="border-b border-slate-100">
-                  <td className="px-2 py-1.5 text-slate-700">
-                    {d.label}
-                    {d.live && <span className="ml-1 text-[10px] text-slate-400">· {LIVE_TAG}</span>}
-                  </td>
-                  <td className="px-2 py-1.5 tabular-nums text-slate-500">{d.n}</td>
-                  {cols.map((c) => (
-                    <td key={c.key} className="px-2 py-1.5 tabular-nums text-slate-700">
-                      {c.key in d.cells ? pct(d.cells[c.key]) : '—'}
-                    </td>
-                  ))}
+        {/* Desglose por dataset + significancia debajo de la tabla */}
+        <div className="space-y-3">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-left uppercase text-slate-400">
+                  <th className="px-2 py-1.5">Dataset</th>
+                  <th className="px-2 py-1.5">Suj.</th>
+                  {cols.map((c) => <th key={c.key} className="px-2 py-1.5">{c.label}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-2 text-[11px] text-slate-400">
-            «—» = método/escenario aún no evaluado en ese dataset. La fila de demo en vivo (2a)
-            se incluye solo aquí, como comparación científica de métodos.
-          </p>
+              </thead>
+              <tbody>
+                {a.per_dataset.filter((d) => d.n > 0).map((d) => (
+                  <tr key={d.id} className="border-b border-slate-100">
+                    <td className="px-2 py-1.5 text-slate-700">
+                      {d.label}
+                      {d.live && <span className="ml-1 text-[10px] text-slate-400">· {LIVE_TAG}</span>}
+                    </td>
+                    <td className="px-2 py-1.5 tabular-nums text-slate-500">{d.n}</td>
+                    {cols.map((c) => (
+                      <td key={c.key} className="px-2 py-1.5 tabular-nums text-slate-700">
+                        {c.key in d.cells ? pct(d.cells[c.key]) : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] text-slate-400">
+              «—» = método/escenario aún no evaluado en ese dataset. La fila de demo en vivo (2a)
+              se incluye solo aquí, como comparación científica de métodos.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Significancia · Wilcoxon pareado (CSP+LDA vs EEGNet)
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+              <WilcoxonStat label="Within" sig={a.significance.within} />
+              <WilcoxonStat label="Cross" sig={a.significance.cross} />
+            </div>
+          </div>
         </div>
       </div>
     </Card>
