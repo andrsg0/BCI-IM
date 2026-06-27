@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   ScatterChart, Scatter, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, Customized,
+  ResponsiveContainer, Legend, ReferenceLine,
 } from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
@@ -67,7 +67,8 @@ const HELP_PIPELINE: HelpContent = {
   intro: '¿Cómo se entrena el modelo clásico? La señal, ya filtrada en la banda µ/β, recorre tres etapas lineales encadenadas que ves aquí en orden, con datos reales del sujeto: primero el filtro espacial (CSP), luego la extracción de características (log-varianza) y por último el clasificador (LDA).',
   points: [
     { label: 'Filtro espacial (CSP)', desc: 'Combina los electrodos para que la diferencia de energía entre imaginar una mano y la otra se note al máximo. Cada topomapa muestra el patrón de un componente: los colores fuertes (típicamente sobre C3/C4, la corteza motora) marcan los electrodos que más pesan; el blanco, los que aporta poco. El número λ sale del problema de autovalores generalizados e indica a qué mano responde el componente (λ≈1 una, λ≈0 la otra).' },
-    { label: '¿Por qué el mapa se ilumina del mismo lado de la mano?', desc: 'Parece contradictorio (la corteza controla el lado opuesto), pero es coherente con el ERD: al imaginar una mano, el hemisferio CONTRARIO baja su potencia. El componente, que busca dónde hay MÁS energía para esa clase, acaba resaltando el hemisferio del MISMO lado (ipsilateral), que es el que conserva la potencia. Ambos lados describen el mismo fenómeno lateralizado, visto desde signos opuestos.' },
+    { label: 'El color es un peso, NO la energía', desc: 'Cuidado con leer "azul = poca energía aquí": el color es el PESO del electrodo en el filtro, y su signo es arbitrario (matemáticamente el mapa entero podría aparecer con los colores invertidos sin cambiar nada). La caída de potencia del hemisferio contrario (el ERD que esperas ver al mover una mano) NO está en estos colores, sino en la log-varianza del componente (el paso siguiente). Por eso no busques aquí la regla "lado contrario a la mano".' },
+    { label: '¿Por qué los mapas se ven ruidosos?', desc: 'Son patrones de UN solo sujeto, con pocos trials y regularización: rara vez salen tan limpios como en los libros. Aun así suele haber cierta lateralización —los componentes de una mano se apoyan algo más en los electrodos de su mismo lado—, pero no esperes un mapa de manual.' },
     { label: 'Características (log-varianza)', desc: 'Un clasificador no entiende ondas, solo números. Por eso cada componente del CSP se resume en su log-varianza (su energía). Así cada intento se vuelve un punto: si las nubes de cada mano se separan, las clases son distinguibles; si se mezclan, habrá errores.' },
     { label: 'Clasificación (LDA)', desc: 'Traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.' },
     { label: 'Validación honesta', desc: 'El modelo se evalúa con intentos que nunca vio durante el entrenamiento (partición held-out), para no engañarnos. Las cifras de precisión (accuracy, κ) y la matriz de confusión se muestran en la sección Resultados.' },
@@ -223,7 +224,7 @@ function CspEquation({ csp }: { csp: CSPResp }) {
     [csp.filters],
   )
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <div className="mb-2 flex items-center justify-center gap-1">
         <EqSym id="Z" sel={sel} onSelect={setSel}>Z</EqSym>
         <span className="font-mono text-2xl text-slate-400">=</span>
@@ -233,7 +234,7 @@ function CspEquation({ csp }: { csp: CSPResp }) {
       </div>
       <p className="mb-2 text-center text-[11px] text-slate-400">Pulsa una letra para ver qué representa.</p>
 
-      <div className="flex-1 overflow-x-auto">
+      <div className="flex-1">
         {sel === 'Z' && (
           <div className="text-sm leading-relaxed text-slate-600">
             <strong>Z — señales virtuales (componentes CSP).</strong> La salida del filtro espacial:
@@ -260,9 +261,9 @@ function CspEquation({ csp }: { csp: CSPResp }) {
               (el color es el peso: rojo +, azul −).
             </p>
             <p className="mb-2 text-[11px] leading-relaxed text-slate-400">
-              Ojo: estos números <strong>no</strong> son los de los mapas de arriba. Los mapas muestran los
-              <em> patrones</em> (la pseudo-inversa de W), que indican de dónde «viene» cada componente y son
-              más fáciles de leer; W son los pesos que de verdad multiplican la señal. Que difieran es normal.
+              Estos números <strong>no</strong> son los de los mapas topográficos. Los mapas muestran los
+              <em> patrones</em> (la pseudo-inversa de W); W son los pesos que de verdad multiplican la señal.
+              Que difieran es normal.
             </p>
             <div className="overflow-x-auto">
               <table className="border-separate" style={{ borderSpacing: 2 }}>
@@ -401,30 +402,9 @@ function splitRect(xMin: number, xMax: number, yMin: number, yMax: number, w0: n
   return { pos, neg, cut }
 }
 
-/** Capa SVG (vía Recharts <Customized>) que pinta las dos regiones de decisión
- *  y la recta frontera, usando las escalas reales del gráfico. */
-function boundaryLayer(p: { xAxisMap?: Record<string, { scale: (v: number) => number }>; yAxisMap?: Record<string, { scale: (v: number) => number }> },
-  dom: { xMin: number; xMax: number; yMin: number; yMax: number },
-  w0: number, w1: number, b: number, posColor: string, negColor: string) {
-  if (!p.xAxisMap || !p.yAxisMap) return null
-  const xs = p.xAxisMap[Object.keys(p.xAxisMap)[0]]?.scale
-  const ys = p.yAxisMap[Object.keys(p.yAxisMap)[0]]?.scale
-  if (!xs || !ys) return null
-  const { pos, neg, cut } = splitRect(dom.xMin, dom.xMax, dom.yMin, dom.yMax, w0, w1, b)
-  const toPts = (poly: { x: number; y: number }[]) => poly.map((q) => `${xs(q.x)},${ys(q.y)}`).join(' ')
-  return (
-    <g>
-      {pos.length >= 3 && <polygon points={toPts(pos)} fill={posColor} fillOpacity={0.1} />}
-      {neg.length >= 3 && <polygon points={toPts(neg)} fill={negColor} fillOpacity={0.1} />}
-      {cut.length === 2 && (
-        <line x1={xs(cut[0].x)} y1={ys(cut[0].y)} x2={xs(cut[1].x)} y2={ys(cut[1].y)}
-          stroke="#0f172a" strokeWidth={2} strokeDasharray="6 3" />
-      )}
-    </g>
-  )
-}
-
-/** Scatter de separabilidad con la frontera de decisión del LDA dibujada encima. */
+/** Scatter de separabilidad con la frontera de decisión del LDA dibujada encima.
+ *  La recta se dibuja con <ReferenceLine segment> (recharts 3 ya no expone las
+ *  escalas a <Customized>, así que calculamos los extremos en coords de datos). */
 function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
   const last = csp.features[0].length - 1
   const pts = csp.features.map((f, i) => ({ x: f[0], y: f[last], cls: csp.labels[i] }))
@@ -438,6 +418,8 @@ function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
   const byClass = csp.classes.map((cls) => pts.filter((q) => q.cls === cls))
   const [w0, w1] = lda.boundary2d.w
   const b = lda.boundary2d.b
+  // Extremos de la frontera (intersección de la recta con el rectángulo visible).
+  const cut = splitRect(xMin, xMax, yMin, yMax, w0, w1, b).cut
   // El lado positivo (f>0) es positive_class; le toca su color de clase.
   const posIdx = csp.classes.indexOf(lda.positive_class)
   const posColor = CLASS_COLORS[(posIdx >= 0 ? posIdx : 0) % CLASS_COLORS.length]
@@ -446,8 +428,8 @@ function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
   return (
     <div className="flex h-full flex-col">
       <p className="mb-1 text-[11px] leading-snug text-slate-500">
-        La <strong>línea discontinua</strong> es la frontera del LDA. Región{' '}
-        <span style={{ color: posColor }}>{lda.positive_class}</span> vs región{' '}
+        La <strong>línea discontinua</strong> es la frontera del LDA: a un lado quedan los{' '}
+        <span style={{ color: posColor }}>{lda.positive_class}</span>, al otro los{' '}
         <span style={{ color: negColor }}>{csp.classes.find((c) => c !== lda.positive_class)}</span>.
         En vivo, la decisión es de qué lado cae el punto.
       </p>
@@ -461,7 +443,12 @@ function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
             <YAxis type="number" dataKey="y" domain={[yMin, yMax]} tick={{ fontSize: 11 }} allowDataOverflow width={36}
               tickFormatter={(v: number) => v.toFixed(1)}
               label={{ value: `log-var comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
-            <Customized component={(props: object) => boundaryLayer(props, { xMin, xMax, yMin, yMax }, w0, w1, b, posColor, negColor)} />
+            {cut.length === 2 && (
+              <ReferenceLine
+                segment={[{ x: cut[0].x, y: cut[0].y }, { x: cut[1].x, y: cut[1].y }]}
+                stroke="#0f172a" strokeWidth={2} strokeDasharray="6 3" ifOverflow="visible"
+              />
+            )}
             <Tooltip cursor={{ strokeDasharray: '3 3' }} />
             <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
             {byClass.map((data, i) => (
@@ -584,6 +571,13 @@ function CspLdaPipeline({ dataset, subject, csp, lda }: {
         <PipelineDiagram nCh={csp.channels.length} nComp={csp.filters.length} nClasses={csp.classes.length} />
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
           <GlossaryText>Cada intento de imaginación motora recorre cuatro etapas, todas operaciones lineales. La señal ya llega filtrada en la banda µ/β; desde ahí el CSP combina los electrodos, la log-varianza resume cada componente en un número y el LDA decide. Abajo se ve cada etapa en orden, con datos reales del sujeto.</GlossaryText>
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+          Para no confundirse: el <strong>mapa topográfico es fijo</strong> (son los pesos del filtro, no un
+          instante). Cada uno de los {csp.filters.length} componentes es una <strong>señal completa en el
+          tiempo</strong>; su log-varianza la resume en <strong>un número por componente y por intento</strong>.
+          Así cada intento se vuelve un punto ({csp.filters.length} coordenadas), y por eso el gráfico de
+          separabilidad tiene muchos puntos: <strong>uno por intento</strong>.
         </p>
       </Widget>
 
