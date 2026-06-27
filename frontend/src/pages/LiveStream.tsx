@@ -7,6 +7,7 @@ import { GridBoard, type GridWidget } from '../components/GridBoard'
 import { FillChart } from '../components/charts/FillChart'
 import { CSPSpaceLive, LDAAxisLive, type CSPHandle, type LDAHandle } from '../components/charts/PipelineStages'
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
+import { RecentTrialsStrip, type TrialOutcome } from '../components/RecentTrials'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
 import { progressFromFrame, type ProgressFrame } from '../lib/progress'
@@ -77,7 +78,7 @@ export default function LiveStream() {
   // (verdad de terreno = fuera de la franja activa). Mide el coste de bajar el umbral.
   const [falseAlarms, setFalseAlarms] = useState(0)
   const [cur, setCur] = useState<{ trial: number; t: string; pred: string; conf: number; committed: boolean; active: boolean } | null>(null)
-  const [recent, setRecent] = useState<{ trial: number; ok: boolean; decided: boolean }[]>([])
+  const [recent, setRecent] = useState<TrialOutcome[]>([])
   const [threshold, setThreshold] = useState(0.65)
   // Compuerta de reposo (B.4): si está activa, solo se compromete cuando el detector
   // de reposo cree que la ventana es imaginación activa (P[activo] ≥ 0.5). Reduce las
@@ -374,6 +375,10 @@ export default function LiveStream() {
       ),
     },
     {
+      i: 'recent', title: 'Verificación por trial (✓ acierto · ✗ fallo · · sin decisión)', accent: 'metric', w: 6, h: 3, minW: 3, minH: 2,
+      el: <RecentTrialsStrip recent={recent} />,
+    },
+    {
       i: 'evolution', title: 'Evolución de la confianza (últimas ventanas)', accent: 'signal', w: 12, h: 5, minW: 4, minH: 3,
       el: <FillChart data={EMPTY} options={chartOptions} onCreate={(u) => (chartU.current = u)} />,
     },
@@ -500,21 +505,7 @@ export default function LiveStream() {
         </label>
       </div>
 
-      {/* tira de aciertos/fallos de los últimos trials */}
-      {recent.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs text-slate-400">últimos trials:</span>
-          {recent.map((r, i) => (
-            <span key={i} title={`trial ${r.trial}`}
-              className={`flex h-6 w-6 items-center justify-center rounded text-xs font-bold ${
-                !r.decided ? 'bg-slate-100 text-slate-400' : r.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-              {!r.decided ? '·' : r.ok ? '✓' : '✗'}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <GridBoard widgets={widgets} storageKey="liveLayout-v3" />
+      <GridBoard widgets={widgets} storageKey="liveLayout-v4" />
     </PageShell>
   )
 }

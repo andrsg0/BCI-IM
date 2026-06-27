@@ -9,6 +9,7 @@ import { GridBoard, type GridWidget } from '../components/GridBoard'
 import { FillChart } from '../components/charts/FillChart'
 import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
+import { RecentTrialsStrip, type TrialOutcome } from '../components/RecentTrials'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
@@ -50,6 +51,7 @@ const CATALOG: CatalogEntry[] = [
   { i: 'filt', title: 'Señal filtrada (µ/β, causal)', accent: 'fir', w: 6, h: 4, minW: 4, minH: 3, live: true, desc: 'La misma señal tras el filtro FIR causal en la banda µ/β.', el: <SignalTrace kind="filt" /> },
   { i: 'conf', title: 'Confianza del clasificador en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Probabilidad de cada clase a lo largo del tiempo.', el: <ConfidenceTrace /> },
   { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Voto suave por trial y aciertos acumulados.', el: <DecisionSummary /> },
+  { i: 'recent', title: 'Verificación por trial', accent: 'metric', w: 6, h: 3, minW: 3, minH: 2, live: true, desc: 'Tira de ✓/✗ con el acierto de cada trial reciente.', el: <RecentTrialsWidget /> },
   { i: 'prediction', title: 'Predicción en vivo', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Clase predicha ahora mismo y barras de probabilidad.', el: <PredictionLive /> },
   { i: 'power', title: 'Potencia µ/β por canal', accent: 'brain', w: 5, h: 4, minW: 3, minH: 3, live: true, desc: 'Barras por electrodo (rojo = más potencia, azul = menos).', el: <PowerBars /> },
   { i: 'disc', title: 'Discriminante LDA en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Proyección sobre el eje de decisión del LDA (signo = clase).', el: <DiscTrace /> },
@@ -321,6 +323,31 @@ function DecisionSummary() {
       )}
     </div>
   )
+}
+
+// ---- Verificación por trial (✓/✗ de los últimos trials, voto suave) ----
+function RecentTrialsWidget() {
+  const { subscribe, resetKey } = useLive()
+  const [recent, setRecent] = useState<TrialOutcome[]>([])
+  const buf = useRef<{ trial: number | null; t: string; sum: Record<string, number>; n: number }>({ trial: null, t: '', sum: {}, n: 0 })
+  useEffect(() => { buf.current = { trial: null, t: '', sum: {}, n: 0 }; setRecent([]) }, [resetKey])
+  useEffect(() => subscribe((m) => {
+    const b = buf.current
+    // finalizar el trial anterior al cambiar de trial (voto suave de las ventanas activas)
+    if (b.trial !== null && m.trial !== b.trial) {
+      if (b.n > 0) {
+        const [pred] = Object.entries(b.sum).reduce((best, x) => (x[1] > best[1] ? x : best))
+        setRecent((r) => [...r.slice(-15), { trial: b.trial as number, ok: pred === b.t, decided: true }])
+      } else {
+        setRecent((r) => [...r.slice(-15), { trial: b.trial as number, ok: false, decided: false }])
+      }
+      buf.current = { trial: null, t: '', sum: {}, n: 0 }
+    }
+    if (buf.current.trial !== m.trial) buf.current = { trial: m.trial, t: m['true'], sum: {}, n: 0 }
+    const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
+    if (active) { const cb = buf.current; for (const c of Object.keys(m.probs)) cb.sum[c] = (cb.sum[c] ?? 0) + m.probs[c]; cb.n++ }
+  }), [subscribe])
+  return <RecentTrialsStrip recent={recent} />
 }
 
 // ---- Predicción instantánea (clase actual + barras de probabilidad) ----
