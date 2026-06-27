@@ -1,0 +1,102 @@
+{
+  "dataset": "BNCI2014_001",
+  "subject": 0,
+  "method": "eegnet_pooled",
+  "fs": 250.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "Fz",
+    "FC3",
+    "FC1",
+    "FCz",
+    "FC2",
+    "FC4",
+    "C5",
+    "C3",
+    "C1",
+    "Cz",
+    "C2",
+    "C4",
+    "C6",
+    "CP3",
+    "CP1",
+    "CPz",
+    "CP2",
+    "CP4",
+    "P1",
+    "Pz",
+    "P2",
+    "POz"
+  ],
+  "holdout": {
+    "by": "loso",
+    "subjects": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  "train_session": null,
+  "n_train": 2538,
+  "n_demo": 0,
+  "accuracy": 0.5993779032382075,
+  "kappa": 0.0,
+  "trained_on": "2026-06-20",
+  "n_components": 8,
+  "fir": {
+    "low_hz": 4.0,
+    "high_hz": 40.0,
+    "num_taps": 101
+  },
+  "extra": {
+    "subjects": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "n_subjects": 9,
+    "loso_per_subject": {
+      "1": 0.6370106761565836,
+      "2": 0.5957446808510638,
+      "3": 0.574468085106383,
+      "4": 0.6512455516014235,
+      "5": 0.549645390070922,
+      "6": 0.568904593639576,
+      "7": 0.6347517730496454,
+      "8": 0.6843971631205674,
+      "9": 0.49823321554770317
+    },
+    "loso_subjects": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "loso_mean": 0.5993779032382075,
+    "device": "cuda",
+    "epochs": 250,
+    "augment": false,
+    "augment_copies": 0,
+    "viz_trained_on": "all_subjects"
+  }
+}

@@ -19,6 +19,8 @@ convolución discreta, filtros FIR, filtrado espacial lineal (CSP) y respuesta e
 | Respuesta en frecuencia `H(e^jω)`     | `backend/src/bci/dsp/frequency_response.py` |
 | CSP = filtro espacial lineal (maximiza varianza) | `backend/src/bci/spatial/csp.py` |
 | Clasificador lineal (LDA)             | `backend/src/bci/models/lda.py`          |
+| Filtrado **causal** por bloques (streaming en vivo, retardo de grupo real) | `backend/src/bci/streaming/simulator.py` |
+| EEGNet como "puente" deep-learning: sus capas ≈ FIR + CSP aprendidos | `backend/src/bci/models/eegnet.py` |
 
 ## Estructura del proyecto
 
@@ -34,6 +36,67 @@ docs/      Documentación, glosario, diseño del frontend y notas teóricas
 1. **Pipeline LTI + clasificación offline + simulación de transmisión en vivo.** ← *completa*
 2. **Interfaz React** con módulos didácticos (convolución, pesos espaciales, cerebro 3D reactivo). ← *en progreso*
 3. **Interoperabilidad**: control de videojuegos (LSL), Arduino (Serial), etc.
+
+## Características principales
+
+### Pipeline DSP/ML (backend)
+
+- **Cadena LTI explícita** `FIR (fijo) → CSP → log-varianza → LDA`
+  (`pipeline/offline.py`), construida desde el `fs` real del dataset (**fs dinámico**):
+  el mismo código sirve a 250 Hz (2a/2b) y 512 Hz (Kumar).
+- **Convolución hecha a mano** (no `scipy.signal.lfilter`): convolución discreta literal,
+  exposición de los productos MAC para la visualización, y versión vectorizada en producción.
+- **CSP por el método de Koles** (autovalores generalizados) con regularización por
+  *shrinkage* opcional para pocos *trials*.
+- **Streaming causal**: `CausalFIR` mantiene el estado entre bloques para que filtrar por
+  ventanas dé exactamente el mismo resultado que filtrar todo de una vez, de forma causal
+  (con el retardo de grupo real que un casco tendría en vivo).
+- **EEGNet** como espejo de aprendizaje profundo de la misma cadena: su capa temporal ≈ banco
+  de filtros FIR aprendido, su capa *depthwise* ≈ CSP aprendido. Se usa para **visualizar** lo
+  que la red descubre **y** para **clasificar en vivo** (decisión revertida 2026-06).
+- **Sin fuga de datos**: CSP y LDA se ajustan solo en la partición de entrenamiento de cada
+  *split*; las métricas honestas son **inter-sesión** (entrenar en sesión 1, evaluar en la 2).
+- **Portabilidad**: modelos, fichas (`ModelCard`) y *payloads* de visualización se persisten
+  como artefactos planos (`.pkl`/`.json`) versionados en el repo; la web se renderiza **sin
+  datos crudos** (estos solo hacen falta para el streaming en vivo de la demo).
+
+### Los 4 regímenes de clasificación
+
+Cada dataset es autosuficiente; **dentro de cada uno** se entrenan y persisten 4 regímenes
+(seleccionables en la página de Clasificación):
+
+| | **within-subject** (calibrado) | **cross-subject** (usuario nuevo, sin calibrar) |
+|---|---|---|
+| **CSP+LDA** | entrena y evalúa en el mismo sujeto | entrena con N−1 sujetos, evalúa en el held-out |
+| **EEGNet**  | entrena y evalúa en el mismo sujeto | entrena con N−1 sujetos, evalúa en el held-out |
+
+> No hay *pool* entre datasets: el cross-subject vive **dentro** de cada dataset (así no hace
+> falta remuestrear a un `fs` común).
+
+### Interfaz didáctica (frontend)
+
+Organizada en **dos mundos** etiquetados visualmente: *offline* (ámbar — lo que se calcula
+antes de transmitir) y *en vivo* (verde — tiempo real).
+
+| Página | Mundo | Qué muestra |
+|---|---|---|
+| **Inicio** | general | Qué es el proyecto, foco LTI, las 3 etapas, diagrama del pipeline |
+| **Dashboard** | general | Panel resumen con widgets reubicables |
+| **Entrenamiento** (`/csp`) | offline | CSP como filtro espacial: pesos, topomapas, señal proyectada; pestaña EEGNet (filtros aprendidos vs. hechos a mano) |
+| **Resultados** | offline | Tabla por sujeto + matriz 2×2 agregada (CSP vs EEGNet × within vs cross), κ de Cohen, rango entre sujetos, Wilcoxon, leyenda de interpretación honesta |
+| **Laboratorio** (`/lab`) | en vivo | Señal cruda vs filtrada; el filtro FIR cambia la señal en vivo |
+| **Clasificación** (`/live`) | en vivo | Demo en vivo con selector de los 4 regímenes; cadena de etapas FIR → CSP → LDA; muñeco que levanta el brazo según la **etiqueta real** del trial |
+| **Demo en vivo** (`/demo`) | en vivo | Vista de la transmisión y predicción en tiempo real |
+| **Cerebro 3D** (`/brain`) | en vivo | Malla anatómica real (`.glb`) con *heatmap* cortical µ/β en GPU y electrodos sobre el cuero cabelludo |
+| **Glosario** | general | Términos enlazados in-situ desde el texto de cada sección (fuente única `docs/glosario.md`) |
+
+### Honestidad metodológica
+
+El proyecto reporta números **medidos**, no estimaciones optimistas. El techo del estado del
+arte en imaginación motora de 2 clases no invasiva es ~70–85 %; se reporta siempre el **rango
+entre sujetos** (la variabilidad por *BCI illiteracy* es grande), la diferencia entre
+within-subject (calibrado) y cross-subject (usuario nuevo), y la estimación inter-sesión como
+proxy honesto del rendimiento en vivo.
 
 ## Datasets soportados
 
@@ -127,8 +190,16 @@ python scripts/setup_data.py --config ../configs/kumar2024.yaml
 
 ### Paso 3 — Entrenar los modelos
 
-Los modelos entrenados (`.pkl` + ficha `.json`) tampoco están en el repositorio
-(están gitignoreados). Hay que generarlos:
+> **⚡ Portabilidad — normalmente NO hace falta entrenar.** Los artefactos ligeros ya
+> vienen **versionados en el repositorio** (`backend/data/processed/`): payloads de
+> visualización (`viz_*.json`), CSV de resultados, fichas `ModelCard` (`model_*.json`)
+> y los propios modelos (`model_*.pkl`, ~2 MB). Tras un `git pull` puedes levantar la
+> app y ver **todos los resultados y gráficos** (y la demo en vivo si descargas los
+> datos crudos) **sin reentrenar nada**. Solo se ignoran los datos crudos pesados
+> (`backend/data/raw/`, caché `mne_data/`). Los pasos 3 y 4 solo son necesarios si
+> quieres **regenerar** los artefactos (p. ej. tras cambiar el pipeline).
+
+Si necesitas regenerar los modelos entrenados (`.pkl` + ficha `.json`):
 
 ```bash
 # Desde backend/, con el venv activado:
@@ -171,10 +242,11 @@ python scripts/train_all_regimes.py \
 
 ### Paso 4 — Precomputar payloads de visualización (portabilidad)
 
-Las páginas offline del frontend (El Modelo, Resultados, Entrenamiento) pueden
+Las páginas offline del frontend (Entrenamiento, Resultados) pueden
 funcionar **sin datos crudos** si se precomputan los JSON de visualización.
 Esto es necesario para portabilidad (p. ej. llevar la laptop a la presentación
-sin necesitar descargar datos ahí).
+sin necesitar descargar datos ahí). **Estos payloads ya vienen versionados**
+(ver nota en el Paso 3); este paso solo es para **regenerarlos**.
 
 ```bash
 # Desde backend/, con el venv activado:

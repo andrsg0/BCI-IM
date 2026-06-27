@@ -1,0 +1,51 @@
+{
+  "dataset": "Kumar2024",
+  "subject": 8,
+  "method": "csp_lda",
+  "fs": 512.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "F7",
+    "F3",
+    "Fz",
+    "F4",
+    "F8",
+    "FC5",
+    "FC1",
+    "FC2",
+    "FC6",
+    "C3",
+    "Cz",
+    "C4",
+    "CP5",
+    "CP1",
+    "CP2",
+    "CP6",
+    "P7",
+    "P3",
+    "Pz",
+    "P4",
+    "P8",
+    "POz"
+  ],
+  "holdout": {
+    "by": "session",
+    "value": "5"
+  },
+  "train_session": "0+1+2+3+4",
+  "n_train": 340,
+  "n_demo": 59,
+  "accuracy": 0.5254237288135594,
+  "kappa": 0.05275229357798161,
+  "trained_on": "2026-06-25",
+  "n_components": 4,
+  "fir": {
+    "low_hz": 8.0,
+    "high_hz": 30.0,
+    "num_taps": 205
+  },
+  "extra": null
+}

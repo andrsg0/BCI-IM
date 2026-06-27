@@ -1,0 +1,57 @@
+{
+  "dataset": "BNCI2014_001",
+  "subject": 9,
+  "method": "eegnet",
+  "fs": 250.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "Fz",
+    "FC3",
+    "FC1",
+    "FCz",
+    "FC2",
+    "FC4",
+    "C5",
+    "C3",
+    "C1",
+    "Cz",
+    "C2",
+    "C4",
+    "C6",
+    "CP3",
+    "CP1",
+    "CPz",
+    "CP2",
+    "CP4",
+    "P1",
+    "Pz",
+    "P2",
+    "POz"
+  ],
+  "holdout": {
+    "by": "session",
+    "value": "1test"
+  },
+  "train_session": "0train",
+  "n_train": 142,
+  "n_demo": 141,
+  "accuracy": 0.5390070921985816,
+  "kappa": 0.07676035055908126,
+  "trained_on": "2026-06-25",
+  "n_components": 8,
+  "fir": {
+    "low_hz": 4.0,
+    "high_hz": 40.0,
+    "num_taps": 101
+  },
+  "extra": {
+    "accuracy_intersession": 0.5390070921985816,
+    "accuracy_kfold": 0.6393863179074447,
+    "folds": 4,
+    "epochs": 250,
+    "viz_trained_on": "train_split"
+  }
+}

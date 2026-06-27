@@ -1,0 +1,1 @@
+{"dataset": "BNCI2014_004", "subject": 2, "fs": 250.0, "channels": ["C3", "Cz", "C4"], "n_trials": 680, "classes": ["left_hand", "right_hand"], "class_distribution": {"left_hand": 340, "right_hand": 340}}

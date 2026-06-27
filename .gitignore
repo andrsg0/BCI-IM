@@ -15,9 +15,16 @@ env/
 
 # ---- Datos (pesados / descargados) ----
 backend/data/raw/*
-backend/data/processed/*
 !backend/data/raw/.gitkeep
+# Artefactos procesados: se IGNORAN por defecto, pero se VERSIONAN los ligeros de
+# portabilidad (payloads de visualización, CSV de resultados, fichas ModelCard) para
+# que un `git pull` baste para ver todos los resultados/gráficos sin reentrenar
+# (ver README "Portabilidad"). Los modelos .pkl se re-incluyen en el bloque de abajo.
+backend/data/processed/*
 !backend/data/processed/.gitkeep
+!backend/data/processed/viz_*.json
+!backend/data/processed/*.csv
+!backend/data/processed/model_*.json
 # Caché de MNE/MOABB
 mne_data/
 *.gdf
@@ -27,10 +34,13 @@ mne_data/
 *.npz
 
 # ---- Modelos entrenados ----
+# Los .pkl se ignoran en todas partes SALVO los de backend/data/processed, que se
+# versionan (~2 MB en total) para poder correr la demo en vivo sin reentrenar.
 *.pkl
 *.joblib
 *.pt
 *.h5
+!backend/data/processed/model_*.pkl
 
 # ---- Frontend / Node ----
 node_modules/

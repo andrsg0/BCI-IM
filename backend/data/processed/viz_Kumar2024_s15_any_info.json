@@ -1,0 +1,1 @@
+{"dataset": "Kumar2024", "subject": 15, "fs": 512.0, "channels": ["F7", "F3", "Fz", "F4", "F8", "FC5", "FC1", "FC2", "FC6", "C3", "Cz", "C4", "CP5", "CP1", "CP2", "CP6", "P7", "P3", "Pz", "P4", "P8", "POz"], "n_trials": 398, "classes": ["left_hand", "right_hand"], "class_distribution": {"left_hand": 198, "right_hand": 200}}

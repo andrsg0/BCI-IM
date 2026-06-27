@@ -1,0 +1,44 @@
+{
+  "dataset": "BNCI2014_004",
+  "subject": 4,
+  "method": "csp_lda_cross",
+  "fs": 250.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "C3",
+    "Cz",
+    "C4"
+  ],
+  "holdout": {
+    "by": "subject",
+    "value": 4
+  },
+  "train_session": null,
+  "n_train": 5780,
+  "n_demo": 740,
+  "accuracy": 0.6608108108108108,
+  "kappa": 0.32162162162162167,
+  "trained_on": "2026-06-25",
+  "n_components": 2,
+  "fir": {
+    "low_hz": 8.0,
+    "high_hz": 30.0,
+    "num_taps": 101
+  },
+  "extra": {
+    "train_subjects": [
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "n_train_subjects": 8
+  }
+}

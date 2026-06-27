@@ -1,0 +1,75 @@
+{
+  "dataset": "Kumar2024",
+  "subject": 9,
+  "method": "eegnet_cross",
+  "fs": 512.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "F7",
+    "F3",
+    "Fz",
+    "F4",
+    "F8",
+    "FC5",
+    "FC1",
+    "FC2",
+    "FC6",
+    "C3",
+    "Cz",
+    "C4",
+    "CP5",
+    "CP1",
+    "CP2",
+    "CP6",
+    "P7",
+    "P3",
+    "Pz",
+    "P4",
+    "P8",
+    "POz"
+  ],
+  "holdout": {
+    "by": "subject",
+    "value": 9
+  },
+  "train_session": null,
+  "n_train": 6759,
+  "n_demo": 397,
+  "accuracy": 0.49622166246851385,
+  "kappa": 0.0,
+  "trained_on": "2026-06-25",
+  "n_components": 8,
+  "fir": {
+    "low_hz": 4.0,
+    "high_hz": 40.0,
+    "num_taps": 101
+  },
+  "extra": {
+    "train_subjects": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ],
+    "n_train_subjects": 17,
+    "device": "cuda",
+    "epochs": 250,
+    "augment": false
+  }
+}

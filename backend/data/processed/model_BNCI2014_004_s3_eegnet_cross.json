@@ -1,0 +1,47 @@
+{
+  "dataset": "BNCI2014_004",
+  "subject": 3,
+  "method": "eegnet_cross",
+  "fs": 250.0,
+  "classes": [
+    "left_hand",
+    "right_hand"
+  ],
+  "channels": [
+    "C3",
+    "Cz",
+    "C4"
+  ],
+  "holdout": {
+    "by": "subject",
+    "value": 3
+  },
+  "train_session": null,
+  "n_train": 5800,
+  "n_demo": 720,
+  "accuracy": 0.5444444444444444,
+  "kappa": 0.0888888888888889,
+  "trained_on": "2026-06-25",
+  "n_components": 8,
+  "fir": {
+    "low_hz": 4.0,
+    "high_hz": 40.0,
+    "num_taps": 101
+  },
+  "extra": {
+    "train_subjects": [
+      1,
+      2,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "n_train_subjects": 8,
+    "device": "cuda",
+    "epochs": 250,
+    "augment": false
+  }
+}
