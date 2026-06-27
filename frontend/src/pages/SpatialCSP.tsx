@@ -69,7 +69,7 @@ const HELP_PIPELINE: HelpContent = {
     { label: 'Filtro espacial (CSP)', desc: 'Combina los electrodos para que la diferencia de energía entre imaginar una mano y la otra se note al máximo. Cada topomapa es uno de esos filtros: los colores fuertes (típicamente sobre C3/C4, la corteza motora) marcan los electrodos que más pesan; el blanco, los que aporta poco. El número λ sale del problema de autovalores generalizados e indica a qué mano responde el componente (λ≈1 una, λ≈0 la otra).' },
     { label: 'Características (log-varianza)', desc: 'Un clasificador no entiende ondas, solo números. Por eso cada componente del CSP se resume en su log-varianza (su energía). Así cada intento se vuelve un punto: si las nubes de cada mano se separan, las clases son distinguibles; si se mezclan, habrá errores.' },
     { label: 'Clasificación (LDA)', desc: 'Traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.' },
-    { label: 'Validación honesta', desc: 'El accuracy y la matriz de confusión se calculan sobre la partición held-out: intentos que el modelo nunca vio durante el entrenamiento. κ (kappa) corrige el acierto por azar (0 = azar, 1 = perfecto).' },
+    { label: 'Validación honesta', desc: 'El modelo se evalúa con intentos que nunca vio durante el entrenamiento (partición held-out), para no engañarnos. Las cifras de precisión (accuracy, κ) y la matriz de confusión se muestran en la sección Resultados.' },
   ],
   terms: ['CSP', 'Filtro espacial', 'Problema de autovalores generalizados', 'Varianza y log-varianza', 'LDA', 'Frontera de decisión / hiperplano', 'Held-out (partición reservada)', 'Accuracy, Matriz de confusión y Kappa de Cohen'],
 }
@@ -118,7 +118,7 @@ function ConfigFicha({ cfg }: { cfg: TrainConfig }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <SpecBlock title="Dataset">
           <Spec label="Nombre" value={d.label} />
-          <Spec label="Sujeto" value={`S${d.subject}${d.n_subjects ? ` de ${d.n_subjects}` : ''}`} />
+          <Spec label="Sujeto" value={`${d.subject}${d.n_subjects ? ` de ${d.n_subjects}` : ''}`} />
           <Spec label="Clases" value={d.classes.join(' vs ')} />
           <Spec label="Canales EEG" value={d.n_channels ?? '—'} />
           <Spec label="Frec. muestreo" value={`${d.fs} Hz`} />
@@ -171,7 +171,6 @@ function DataSelector({ datasets, dataset, subject, onDataset, onSubject }: {
   const nSubjects = cur?.subjects ?? 9
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Datos (offline)</span>
       <label className="text-sm text-slate-500">Dataset</label>
       <select
         value={dataset}
@@ -187,10 +186,9 @@ function DataSelector({ datasets, dataset, subject, onDataset, onSubject }: {
         className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700"
       >
         {Array.from({ length: nSubjects }, (_, i) => i + 1).map((s) => (
-          <option key={s} value={s}>S{s}</option>
+          <option key={s} value={s}>{s}</option>
         ))}
       </select>
-      <span className="text-xs text-slate-400">No depende del selector lateral (ese controla la demo en vivo).</span>
     </div>
   )
 }
@@ -343,7 +341,7 @@ function SignalCompare({ dataset, subject, nComp }: { dataset: string; subject: 
       <div className="mb-1 flex items-center justify-between gap-2">
         <p className="text-[11px] leading-snug text-slate-500">
           {sig
-            ? <>Electrodo crudo <strong>{sig.channel}</strong> (ruidoso) vs salida del <strong>comp {sig.component}</strong> (limpia). Normalizadas para comparar forma.</>
+            ? <>Electrodo crudo <strong>{sig.channel}</strong> (el de mayor peso en este componente) frente a la salida del <strong>comp {sig.component}</strong>. Normalizadas para comparar forma, no amplitud.</>
             : 'Cargando señal…'}
         </p>
         <select
@@ -364,7 +362,7 @@ function SignalCompare({ dataset, subject, nComp }: { dataset: string; subject: 
             <YAxis tick={{ fontSize: 10 }} width={28} />
             <Tooltip contentStyle={{ fontSize: 11 }} />
             <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
-            <Line name="Cruda (1 canal)" dataKey="raw" stroke="#cbd5e1" dot={false} strokeWidth={1} isAnimationActive={false} />
+            <Line name="Cruda (1 canal)" dataKey="raw" stroke="#94a3b8" dot={false} strokeWidth={1.2} isAnimationActive={false} />
             <Line name="Filtrada (CSP)" dataKey="csp" stroke="#7c3aed" dot={false} strokeWidth={1.8} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
@@ -450,9 +448,11 @@ function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
           <ScatterChart margin={{ top: 4, right: 12, bottom: 26, left: 4 }}>
             <CartesianGrid stroke="#eef2f7" />
             <XAxis type="number" dataKey="x" domain={[xMin, xMax]} tick={{ fontSize: 11 }} allowDataOverflow
+              tickFormatter={(v: number) => v.toFixed(1)}
               label={{ value: `log-var comp 0  →  ${csp.classes[0]}`, position: 'bottom', fontSize: 10, fill: '#94a3b8' }} />
-            <YAxis type="number" dataKey="y" domain={[yMin, yMax]} tick={{ fontSize: 11 }} allowDataOverflow
-              label={{ value: `comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
+            <YAxis type="number" dataKey="y" domain={[yMin, yMax]} tick={{ fontSize: 11 }} allowDataOverflow width={36}
+              tickFormatter={(v: number) => v.toFixed(1)}
+              label={{ value: `log-var comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
             <Customized component={(props: object) => boundaryLayer(props, { xMin, xMax, yMin, yMax }, w0, w1, b, posColor, negColor)} />
             <Tooltip cursor={{ strokeDasharray: '3 3' }} />
             <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
@@ -462,56 +462,6 @@ function DecisionScatter({ csp, lda }: { csp: CSPResp; lda: LdaResp }) {
           </ScatterChart>
         </ResponsiveContainer>
       </div>
-    </div>
-  )
-}
-
-/** Matriz de confusión 2×2 interactiva (hover resalta y explica cada celda). */
-function ConfusionMatrix({ lda }: { lda: LdaResp }) {
-  const { labels, matrix } = lda.confusion
-  const total = matrix.flat().reduce((a, b) => a + b, 0) || 1
-  const max = Math.max(...matrix.flat(), 1)
-  const [hover, setHover] = useState<[number, number] | null>(null)
-  const short = (s: string) => s.replace('_hand', '').replace('left', 'Izq.').replace('right', 'Der.')
-  return (
-    <div className="flex h-full flex-col">
-      <div className="mb-2 grid grid-cols-[auto_1fr] gap-1 text-[11px] text-slate-500">
-        <div className="flex items-center">
-          <span className="-rotate-90 whitespace-nowrap text-[10px] uppercase tracking-wide text-slate-400">Real</span>
-        </div>
-        <div>
-          <div className="mb-1 grid grid-cols-[3.5rem_1fr_1fr] items-center text-center">
-            <span />
-            {labels.map((l) => <span key={l} className="text-[10px] text-slate-400">pred. {short(l)}</span>)}
-          </div>
-          {matrix.map((row, i) => (
-            <div key={i} className="grid grid-cols-[3.5rem_1fr_1fr] items-center gap-1">
-              <span className="pr-1 text-right text-[10px] text-slate-500">{short(labels[i])}</span>
-              {row.map((v, j) => {
-                const isDiag = i === j
-                const t = v / max
-                const base = isDiag ? '5,150,105' : '225,29,72'   // verde acierto / rojo error
-                return (
-                  <button key={j}
-                    onMouseEnter={() => setHover([i, j])} onMouseLeave={() => setHover(null)}
-                    className="rounded-md py-3 text-center transition"
-                    style={{ background: `rgba(${base},${0.12 + t * 0.6})`, outline: hover && hover[0] === i && hover[1] === j ? '2px solid #0f172a' : 'none' }}
-                  >
-                    <span className="block text-base font-semibold text-slate-800">{v}</span>
-                    <span className="block text-[10px] text-slate-500">{((v / total) * 100).toFixed(0)}%</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-      <p className="mt-auto text-[11px] leading-snug text-slate-500">
-        {hover
-          ? <><strong>{matrix[hover[0]][hover[1]]}</strong> trials reales de <strong>{short(labels[hover[0]])}</strong>{' '}
-            {hover[0] === hover[1] ? 'clasificados correctamente' : <>clasificados como <strong>{short(labels[hover[1]])}</strong> (error)</>}.</>
-          : <>Diagonal = aciertos (verde); fuera = confusiones (rojo). {lda.n_eval} trials held-out. Pasa el ratón por cada celda.</>}
-      </p>
     </div>
   )
 }
@@ -544,47 +494,6 @@ function LdaFormula({ lda, classes }: { lda: LdaResp; classes: string[] }) {
         (= {lda.bias.toFixed(2)}). La frontera es justo donde <span className="font-mono">y = 0</span>: un hiperplano que
         parte el espacio en las dos regiones de comando.
       </p>
-    </div>
-  )
-}
-
-/** Tarjeta de métrica grande (accuracy, κ…). */
-function MetricCard({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'good' | 'warn' | 'plain' }) {
-  const color = tone === 'good' ? 'text-emerald-600' : tone === 'warn' ? 'text-amber-600' : 'text-slate-800'
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
-      {hint && <div className="text-[10px] text-slate-400">{hint}</div>}
-    </div>
-  )
-}
-
-/** Métricas de entrenamiento del LDA (movidas desde la ficha de configuración). */
-function ValidationCards({ lda, cfg }: { lda: LdaResp; cfg: TrainConfig | null }) {
-  const v = cfg?.validation
-  const apt = lda.accuracy >= 0.7
-  return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="grid grid-cols-2 gap-2">
-        <MetricCard label="Accuracy (held-out)" value={`${(lda.accuracy * 100).toFixed(1)}%`}
-          hint={apt ? '≥ 70 % → apto para BCI en vivo' : '< 70 % → aún no apto'} tone={apt ? 'good' : 'warn'} />
-        <MetricCard label="κ (kappa)" value={lda.kappa.toFixed(2)} hint="corrige el azar (0–1)" />
-      </div>
-      <dl className="rounded-lg border border-slate-200 bg-white p-3">
-        <Spec label="Clasificador" value={(v?.classifier ?? 'lda').toUpperCase()} />
-        <Spec label="Validación cruzada" value={lda.cv_folds != null ? `${lda.cv_folds}-fold estratificada` : '—'} hint="within-subject, sin fuga de datos" />
-        <Spec label="Held-out (demo)" value={lda.holdout_kind} hint={v?.holdout_desc ?? undefined} />
-        <Spec label="Trials entren. / demo" value={v?.n_train != null ? `${v.n_train} / ${v.n_demo}` : `— / ${lda.n_eval}`} />
-        <Spec label="Trials evaluados" value={lda.n_eval} hint="partición held-out (nunca vista)" />
-        <Spec label="Entrenado" value={v?.trained_on ?? '—'} />
-      </dl>
-      {!lda.has_model && (
-        <p className="text-[11px] text-amber-600">
-          Sin modelo en disco: métricas calculadas con un ajuste al vuelo. Entrénalo con
-          <code> scripts/train_model.py</code> para fijarlas.
-        </p>
-      )}
     </div>
   )
 }
@@ -626,7 +535,8 @@ function SeparabilityScatter({ csp }: { csp: CSPResp }) {
   return (
     <div className="flex h-full flex-col">
       <p className="mb-1 text-[11px] leading-snug text-slate-500">
-        Cada punto es un <strong>trial</strong>. Eje X = energía del <strong>comp 0</strong> (sube con{' '}
+        Cada punto es un <strong>trial</strong>. Usamos los dos componentes más discriminativos (los extremos del
+        espectro): eje X = energía del <strong>comp 0</strong> (sube con{' '}
         <span style={{ color: CLASS_COLORS[0] }}>{csp.classes[0]}</span>); eje Y = <strong>comp {last}</strong> (sube con{' '}
         <span style={{ color: CLASS_COLORS[1] }}>{csp.classes[1]}</span>). Si las dos nubes se <strong>separan</strong>, las clases son distinguibles.
       </p>
@@ -637,7 +547,7 @@ function SeparabilityScatter({ csp }: { csp: CSPResp }) {
             <XAxis type="number" dataKey="x" name="log-var comp 0" tick={{ fontSize: 11 }}
               label={{ value: `log-var comp 0  →  ${csp.classes[0]}`, position: 'bottom', fontSize: 10, fill: '#94a3b8' }} />
             <YAxis type="number" dataKey="y" name={`log-var comp ${last}`} tick={{ fontSize: 11 }}
-              label={{ value: `comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
+              label={{ value: `log-var comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
             <Tooltip cursor={{ strokeDasharray: '3 3' }} />
             <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
             {byClass.map((pts, i) => (
@@ -653,8 +563,8 @@ function SeparabilityScatter({ csp }: { csp: CSPResp }) {
 // --- Flujo cronológico del modelo clásico (CSP → log-varianza → LDA) --------
 /** Reemplaza los antiguos 3 GridBoards: un único recorrido en cajas, en orden,
  *  con explicaciones concisas (los términos se auto-enlazan al glosario). */
-function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
-  dataset: string; subject: number; csp: CSPResp; lda: LdaResp | null; cfg: TrainConfig | null
+function CspLdaPipeline({ dataset, subject, csp, lda }: {
+  dataset: string; subject: number; csp: CSPResp; lda: LdaResp | null
 }) {
   // qué clase resalta cada componente: λ alto (≥0.5) → primera clase; λ bajo → segunda.
   const favoredClass = (ci: number) => (csp.eigenvalues[ci] >= 0.5 ? csp.classes[0] : csp.classes[1])
@@ -670,13 +580,13 @@ function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
       </Widget>
 
       {/* 1 · Filtro espacial (CSP): mapas + ecuación */}
-      <Widget title="Filtro espacial (CSP)" accent="csp">
+      <Widget title="CSP (Filtro espacial)" accent="csp">
         <p className="mb-3 text-xs leading-relaxed text-slate-500">
           <GlossaryText>El casco capta una mezcla de toda la actividad cerebral. El CSP funciona como un lente: combina los electrodos para que la diferencia entre imaginar la mano izquierda y la derecha resalte al máximo. Cada topomapa es uno de esos filtros espaciales y los colores fuertes marcan los electrodos que más pesan. El número λ sale del problema de autovalores generalizados e indica a qué mano responde cada componente (λ≈1 una, λ≈0 la otra).</GlossaryText>
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <div className="mb-2 text-sm font-medium text-slate-600">Mapas topográficos (un filtro por componente)</div>
+            <div className="mb-2 text-sm font-medium text-slate-600">Mapas topográficos</div>
             <div className="flex flex-wrap content-start justify-around gap-2">
               {csp.patterns.map((pat, ci) => (
                 <div key={ci} className="text-center">
@@ -691,7 +601,7 @@ function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
             </div>
           </div>
           <div className="min-h-[320px]">
-            <div className="mb-2 text-sm font-medium text-slate-600">Ecuación de proyección  Z = W·X</div>
+            <div className="mb-2 text-sm font-medium text-slate-600">Ecuación de proyección</div>
             <CspEquation csp={csp} />
           </div>
         </div>
@@ -708,7 +618,7 @@ function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
       </Widget>
 
       {/* 3 · Características (log-varianza): fórmula + scatter */}
-      <Widget title="Características (log-varianza)" accent="metric">
+      <Widget title="Log-var (Características)" accent="metric">
         <p className="mb-3 text-xs leading-relaxed text-slate-500">
           <GlossaryText>Un clasificador no entiende ondas, solo números. Por eso resumimos cada componente del CSP en su log-varianza (cuánta energía tiene). Así cada intento se vuelve un punto: si los puntos de cada mano se separan, el modelo podrá distinguirlas.</GlossaryText>
         </p>
@@ -718,29 +628,17 @@ function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
         </div>
       </Widget>
 
-      {/* 4 · Clasificación (LDA): frontera + regla + validación */}
+      {/* 4 · Clasificación (LDA): frontera + regla */}
       {lda ? (
-        <>
-          <Widget title="Clasificación (LDA)" accent="metric">
-            <p className="mb-3 text-xs leading-relaxed text-slate-500">
-              <GlossaryText>El LDA traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.</GlossaryText>
-            </p>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="min-h-[280px]"><DecisionScatter csp={csp} lda={lda} /></div>
-              <div className="min-h-[280px]"><LdaFormula lda={lda} classes={csp.classes} /></div>
-            </div>
-          </Widget>
-
-          <Widget title="Validación (held-out)" accent="metric">
-            <p className="mb-3 text-xs leading-relaxed text-slate-500">
-              <GlossaryText>Para saber si funciona, lo probamos con intentos que el modelo nunca vio durante el entrenamiento (partición held-out). El accuracy es el porcentaje de aciertos y la matriz de confusión muestra dónde se equivoca.</GlossaryText>
-            </p>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="min-h-[260px]"><ValidationCards lda={lda} cfg={cfg} /></div>
-              <div className="min-h-[260px]"><ConfusionMatrix lda={lda} /></div>
-            </div>
-          </Widget>
-        </>
+        <Widget title="LDA (Clasificación)" accent="metric">
+          <p className="mb-3 text-xs leading-relaxed text-slate-500">
+            <GlossaryText>El LDA traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto. (Su precisión sobre datos no vistos se mide en Resultados.)</GlossaryText>
+          </p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="min-h-[280px]"><DecisionScatter csp={csp} lda={lda} /></div>
+            <div className="min-h-[280px]"><LdaFormula lda={lda} classes={csp.classes} /></div>
+          </div>
+        </Widget>
       ) : (
         <div className="flex h-32 items-center justify-center text-slate-300">Calculando frontera de decisión…</div>
       )}
@@ -806,7 +704,7 @@ export default function SpatialCSP() {
 
       {/* Datos del dataset y preprocesamiento (plegable) */}
       <div className="mb-4">
-        <Collapsible title="Datos del dataset y preprocesamiento" defaultOpen>
+        <Collapsible title="Información del dataset y preprocesamiento" defaultOpen>
           {cfg ? <ConfigFicha cfg={cfg} /> : <div className="text-sm text-slate-300">Cargando configuración…</div>}
         </Collapsible>
       </div>
@@ -826,7 +724,7 @@ export default function SpatialCSP() {
       ) : !csp ? (
         <div className="flex h-64 items-center justify-center text-slate-300">Calculando CSP…</div>
       ) : (
-        <CspLdaPipeline dataset={dataset} subject={subject} csp={csp} lda={lda} cfg={cfg} />
+        <CspLdaPipeline dataset={dataset} subject={subject} csp={csp} lda={lda} />
       )}
     </PageShell>
   )

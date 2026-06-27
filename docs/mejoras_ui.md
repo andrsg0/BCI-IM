@@ -44,67 +44,64 @@ La idea es ir resolviéndolas fase por fase. Los puntos ambiguos se marcarán co
 
 ## Entrenamiento
 
-- [ ] Renombrar título: "Datos del dataset y preprocesamiento" → "Información del dataset
+- [x] Renombrar título: "Datos del dataset y preprocesamiento" → "Información del dataset
   y preprocesamiento".
-- [ ] Renombrar títulos de secciones:
-  - [ ] "Mapas topográficos (un filtro por componente)" → "Mapas topográficos"
-  - [ ] "Ecuación de proyección Z = W·X" → "Ecuación de proyección"
-  - [ ] "Cálculo: log-varianza por componente" → "Fórmula log-varianza"
-  - [ ] "Regla del clasificador y = w·F + b" → "Regla del clasificador"
+- [x] Renombrar títulos de secciones:
+  - [x] "Mapas topográficos (un filtro por componente)" → "Mapas topográficos"
+  - [x] "Ecuación de proyección Z = W·X" → "Ecuación de proyección"
+  - [x] "Cálculo: log-varianza por componente" → "Fórmula log-varianza" → N/A: ese título
+    desapareció en el rewrite (la fórmula va dentro de la caja "Log-var (Características)").
+  - [x] "Regla del clasificador y = w·F + b" → "Regla del clasificador" → N/A: ese título
+    desapareció en el rewrite (la regla va dentro de la caja "LDA (Clasificación)").
 
 ### Filtro espacial (CSP)
 
-- [ ] Renombrar título: → "CSP (Filtro espacial)".
-- [ ] Documentar en algún lugar cómo se obtienen los autovalores del filtro topográfico.
-- [ ] Mejorar la cronología de las subsecciones. Esta es la primera etapa del pipeline:
-  partimos de muchas señales crudas y hay que explicar cómo se convierten en la matriz
-  / mapa topográfico. Posible solución: un diagrama dentro de una sección desplegable,
-  igual que "Información del dataset y preprocesamiento". **(pendiente: definir el
-  enfoque antes de implementar)**.
-- [ ] Cambiar textos de la barra selectora de dataset:
-  - [ ] "Datos (offline)" → borrar.
-  - [ ] "No depende del selector lateral (ese controla la demo en vivo)." → borrar.
-  - [ ] Unificar las etiquetas de Sujeto: o bien cambiar "S1, S2, …" por "1, 2, …", o bien
-    cambiar las etiquetas de la barra lateral ("1, 2, …") por "S1, S2, …".
-- [ ] En la ecuación de proyección: el texto actual está bien, pero en la zona de `?` añadir
-  una explicación de cómo se obtuvo.
-- [ ] Mejorar el gráfico "Señal: cruda vs filtrada por CSP":
-  - [ ] La señal cruda se ve demasiado opaca.
-  - [ ] Aclarar por qué solo se muestra un electrodo crudo (por ejemplo F7) y por qué ese en concreto.
-  - [ ] Aclarar por qué se elige un electrodo específico (P7) para mostrar.
-  - [ ] Evaluar si este gráfico es relevante en esta sección.
+- [x] Renombrar título: → "CSP (Filtro espacial)".
+- [x] Documentar en algún lugar cómo se obtienen los autovalores del filtro topográfico.
+  → Explicado en la caja CSP y en el `?` (problema de autovalores generalizados).
+- [x] Mejorar la cronología de las subsecciones. → Resuelto con el rewrite: diagrama de
+  recorrido (FIR → CSP → log-var → LDA) arriba y cajas en orden.
+- [x] Cambiar textos de la barra selectora de dataset:
+  - [x] "Datos (offline)" → borrar.
+  - [x] "No depende del selector lateral (ese controla la demo en vivo)." → borrar.
+  - [x] Unificar las etiquetas de Sujeto. → Unificado a números planos (el sidebar ya usa
+    números): selector y ficha muestran "1, 2, …".
+- [x] En la ecuación de proyección: añadir en `?` una explicación de cómo se obtuvo.
+  → El `?` explica W (mapas de pesos) y el origen de λ.
+- [x] Mejorar el gráfico "Señal: cruda vs filtrada por CSP":
+  - [x] La señal cruda se ve demasiado opaca. → Trazo más oscuro (#94a3b8) y algo más grueso.
+  - [x] Aclarar por qué se muestra ese electrodo. → Caption: "el de mayor peso en este
+    componente" (por eso cambia entre componentes).
+  - [x] (Mismo punto: por qué P7/F7/etc.) → Mismo motivo.
+  - [x] Evaluar si este gráfico es relevante. → Se mantiene: muestra el efecto de limpieza del CSP.
 
 ### Características (log-var)
 
-- [ ] Renombrar título: → "Log-var (Características)".
-- [ ] En el gráfico "Separabilidad de clases (espacio de características)", explicar por qué
-  el eje X usa solo el componente 0 y no también el componente 1.
-- [ ] Revisar las etiquetas de los ejes: en X dice "log-var comp 0" y en Y solo "comp 3".
-  Corregir si es inconsistencia.
+- [x] Renombrar título: → "Log-var (Características)".
+- [x] En "Separabilidad de clases", explicar por qué el eje X usa el comp 0 y no el comp 1.
+  → Caption: usamos los dos componentes más discriminativos (los extremos del espectro).
+- [x] Revisar las etiquetas de los ejes (X "log-var comp 0", Y solo "comp N"). → Corregido:
+  ambos ejes dicen "log-var comp N".
 
 ### Clasificación (LDA)
 
-- [ ] Renombrar título: → "LDA (Clasificación)".
-- [ ] En el gráfico "Frontera de decisión sobre el espacio de características", los números
-  de los ejes son demasiado largos: truncarlos para que se vean mejor.
-- [ ] Revisar las etiquetas de los ejes: en X dice "log-var comp 0" y en Y solo "comp 3".
-  Corregir si es inconsistencia.
-- [ ] Aclarar la presencia de la matriz de confusión en el LDA: ¿se prueban los datos al
-  finalizar para reportar los resultados del entrenamiento? ¿Qué es el "held out"? Esto
-  se relaciona con la cronología: debería explicarse mejor cómo y cuándo se obtienen
-  estos resultados.
-- [ ] Eliminar las métricas de entrenamiento y la matriz de confusión.
+- [x] Renombrar título: → "LDA (Clasificación)".
+- [x] Truncar los números de los ejes de la frontera de decisión. → `tickFormatter` a 1 decimal.
+- [x] Revisar las etiquetas de los ejes. → Corregido igual que en log-var.
+- [x] Aclarar la matriz de confusión / held-out / cuándo se obtiene. → Explicado en el `?`
+  (validación honesta) y nota: las cifras se ven en Resultados.
+- [x] Eliminar las métricas de entrenamiento y la matriz de confusión. → Caja "Validación
+  (held-out)" eliminada (ValidationCards + ConfusionMatrix). Las métricas viven en Resultados.
 
-> Explicar los conceptos: ventana de clasificación, componentes CSP, shrinkage CSP y
-> validación cruzada. Posible solución: un icono `?` que lleve a la zona específica de
-> la explicación principal donde se describe el concepto de cada gráfico.
+> Pendiente (2ª pasada general): explicar conceptos como ventana de clasificación, comp CSP,
+> shrinkage CSP y validación cruzada con enlaces desde el `?`. (Hoy ya hay hints en la ficha
+> y auto-enlace al glosario.)
 
 ### EEGNet
 
-- [ ] Unificar el formato con el resto de la página: poner el canvas y convertir los gráficos
-  en widgets como en las demás secciones. Alternativa: quitar el formato de widgets de
-  toda la sección "El Modelo" y dejar páginas normales, lo que quizás encaje mejor con la
-  cronología. **(pendiente: decidir entre ambas opciones)**.
+- [x] Unificar el formato con el resto de la página. → Resuelto por el rewrite: se eligió la
+  alternativa "sin widgets/canvas". Toda la sección "El Modelo" (CSP+LDA y EEGNet) usa el
+  mismo formato de cajas en flujo cronológico.
 
 ---
 
