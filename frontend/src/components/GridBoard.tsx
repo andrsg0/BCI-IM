@@ -2,7 +2,7 @@ import {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
   type ReactNode, type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { GripVertical, RotateCcw } from 'lucide-react'
+import { GripVertical, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react'
 import type { Accent } from './Widget'
 
 // ---- cuadrícula propia (drag + resize con snap, sin dependencias externas) ----
@@ -28,7 +28,12 @@ export interface GridWidget {
   minH?: number
 }
 
-interface Item { i: string; x: number; y: number; w: number; h: number; minW: number; minH: number }
+interface Item { i: string; x: number; y: number; w: number; h: number; minW: number; minH: number; z: number }
+
+/** z de la capa más alta + 1 (para traer al frente). */
+const topZ = (items: Item[]) => (items.length ? Math.max(...items.map((it) => it.z)) : 0) + 1
+/** z de la capa más baja − 1 (para enviar al fondo). */
+const bottomZ = (items: Item[]) => (items.length ? Math.min(...items.map((it) => it.z)) : 0) - 1
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -50,12 +55,12 @@ function firstFit(items: Item[], w: number, h: number): { x: number; y: number }
 /** Disposición por defecto: coloca los widgets en flujo según su tamaño. */
 function buildDefault(widgets: GridWidget[]): Item[] {
   const out: Item[] = []
-  for (const wdg of widgets) {
+  widgets.forEach((wdg, idx) => {
     const w = wdg.w ?? 6
     const h = wdg.h ?? 4
     const { x, y } = firstFit(out, w, h)
-    out.push({ i: wdg.i, x, y, w, h, minW: wdg.minW ?? 3, minH: wdg.minH ?? 3 })
-  }
+    out.push({ i: wdg.i, x, y, w, h, minW: wdg.minW ?? 3, minH: wdg.minH ?? 3, z: idx })
+  })
   return out
 }
 
@@ -69,11 +74,12 @@ function reconcile(saved: Item[], widgets: GridWidget[]): Item[] {
   const out: Item[] = []
   for (const wdg of widgets) {
     const prev = byId.get(wdg.i)
-    if (prev) { out.push(prev); continue }
+    // Compat: disposiciones guardadas antes de las capas no tienen `z`.
+    if (prev) { out.push({ ...prev, z: prev.z ?? 0 }); continue }
     const w = wdg.w ?? 6
     const h = wdg.h ?? 4
     const { x, y } = firstFit(out, w, h)
-    out.push({ i: wdg.i, x, y, w, h, minW: wdg.minW ?? 3, minH: wdg.minH ?? 3 })
+    out.push({ i: wdg.i, x, y, w, h, minW: wdg.minW ?? 3, minH: wdg.minH ?? 3, z: topZ(out) })
   }
   return out
 }
@@ -156,6 +162,10 @@ export function GridBoard({ widgets, storageKey, toolbar, minHeight = 320 }: {
     window.addEventListener('pointerup', onUp)
   }
 
+  // Capas: subir = traer al frente (z más alto); bajar = enviar al fondo (z más bajo).
+  const raise = (id: string) => setItems((prev) => prev.map((it) => (it.i === id ? { ...it, z: topZ(prev) } : it)))
+  const lower = (id: string) => setItems((prev) => prev.map((it) => (it.i === id ? { ...it, z: bottomZ(prev) } : it)))
+
   const rows = items.reduce((m, it) => Math.max(m, it.y + it.h), 0)
   const height = rows * (ROW_H + GAP) + GAP
   const px = (it: Item) => ({
@@ -192,8 +202,8 @@ export function GridBoard({ widgets, storageKey, toolbar, minHeight = 320 }: {
           return (
             <div
               key={w.i}
-              className={`absolute ${active === w.i ? 'z-10' : 'z-0'}`}
-              style={{ ...px(it), transition: active === w.i ? 'none' : 'left .15s, top .15s, width .15s, height .15s' }}
+              className="absolute"
+              style={{ ...px(it), zIndex: active === w.i ? 9999 : it.z, transition: active === w.i ? 'none' : 'left .15s, top .15s, width .15s, height .15s' }}
             >
               <Card
                 title={w.title}
@@ -202,6 +212,8 @@ export function GridBoard({ widgets, storageKey, toolbar, minHeight = 320 }: {
                 dragging={active === w.i}
                 onDragStart={(e) => start(e, w.i, 'move')}
                 onResizeStart={(e) => start(e, w.i, 'resize')}
+                onRaise={() => raise(w.i)}
+                onLower={() => lower(w.i)}
               >
                 {w.el}
               </Card>
@@ -213,13 +225,15 @@ export function GridBoard({ widgets, storageKey, toolbar, minHeight = 320 }: {
   )
 }
 
-function Card({ title, accent, actions, children, onDragStart, onResizeStart, dragging }: {
+function Card({ title, accent, actions, children, onDragStart, onResizeStart, onRaise, onLower, dragging }: {
   title: string
   accent: Accent
   actions?: ReactNode
   children: ReactNode
   onDragStart: (e: ReactPointerEvent) => void
   onResizeStart: (e: ReactPointerEvent) => void
+  onRaise: () => void
+  onLower: () => void
   dragging: boolean
 }) {
   return (
@@ -232,12 +246,17 @@ function Card({ title, accent, actions, children, onDragStart, onResizeStart, dr
         className="flex cursor-move touch-none select-none items-center gap-2 border-b border-slate-100 px-3 py-2"
       >
         <GripVertical size={14} className="text-slate-300" />
-        <span className="text-sm font-semibold text-slate-700">{title}</span>
-        {actions && (
-          <div className="ml-auto flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
-            {actions}
-          </div>
-        )}
+        <span className="truncate text-sm font-semibold text-slate-700">{title}</span>
+        <div className="ml-auto flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+          {actions}
+          {/* Control de capas (z-index) para paneles superpuestos. */}
+          <button onClick={onRaise} title="Subir capa (traer al frente)" className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
+            <ChevronUp size={14} />
+          </button>
+          <button onClick={onLower} title="Bajar capa (enviar al fondo)" className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
+            <ChevronDown size={14} />
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
       <div
