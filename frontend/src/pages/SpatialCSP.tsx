@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   ScatterChart, Scatter, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -6,7 +6,8 @@ import {
 } from 'recharts'
 import { PageShell } from '../components/PageShell'
 import type { HelpContent } from '../components/HelpButton'
-import { GridBoard, type GridWidget } from '../components/GridBoard'
+import { Widget } from '../components/Widget'
+import { GlossaryText } from '../components/GlossaryText'
 import { Topomap, type Pos2D } from '../components/Topomap'
 import { EEGNetModel } from '../components/EEGNetModel'
 import { getJSON } from '../api/client'
@@ -57,46 +58,20 @@ interface LdaResp {
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
 
-// Texto de introducción por subsección (se muestra bajo el título).
-const INTRO_LOGVAR = 'Los clasificadores no pueden procesar ondas que cambian en el tiempo; necesitan valores estáticos. Como la imaginación motora altera la potencia de los ritmos cerebrales, transformamos cada componente temporal en un único número calculando su varianza energética. Aplicamos un logaritmo natural para normalizar las escalas y mapear cada intento (trial) como un punto en un espacio geométrico.'
+// Texto de introducción de la pestaña EEGNet (se muestra bajo el título).
 const INTRO_EEGNET = 'A diferencia del enfoque clásico por pasos, EEGNet es una red neuronal convolucional compacta diseñada específicamente para EEG. Utiliza un aprendizaje de extremo a extremo (end-to-end): el modelo recibe la señal temporal cruda y sus capas internas aprenden de forma automática tanto los filtros temporales como los espaciales más óptimos, sin necesidad de calcular la varianza manualmente.'
-const INTRO_LDA = 'El Análisis de Discriminante Lineal (LDA) recibe las características geométricas calculadas en el paso anterior. Su trabajo es trazar una frontera de decisión óptima (un hiperplano) que divida el espacio en dos regiones. Cuando ingresen datos nuevos en tiempo real, el sistema simplemente verificará de qué lado de la línea cae el punto para emitir el comando.'
 
-const HELP_CSP: HelpContent = {
-  pipeline: 'Etapa 3 del pipeline · Filtro espacial (CSP)',
-  intro: '¿Cómo interpretar estos mapas? Cada círculo representa la cabeza del usuario mirada desde arriba (la nariz apunta hacia arriba) y los puntos son los electrodos físicos. Cada mapa es un filtro espacial (un componente) que combina todos los canales.',
+// Ayuda única para toda la pestaña CSP + LDA (las tres etapas, en orden).
+const HELP_PIPELINE: HelpContent = {
+  pipeline: 'El modelo clásico · CSP → log-varianza → LDA',
+  intro: '¿Cómo se entrena el modelo clásico? La señal, ya filtrada en la banda µ/β, recorre tres etapas lineales encadenadas que ves aquí en orden, con datos reales del sujeto: primero el filtro espacial (CSP), luego la extracción de características (log-varianza) y por último el clasificador (LDA).',
   points: [
-    { label: '¿Qué significan los colores?', desc: 'Los colores representan el peso (coeficiente) que el algoritmo le da a cada electrodo. Azul o rojo intensos: electrodos con pesos muy altos (positivos o negativos); el CSP descubrió que esa zona cerebral es clave para distinguir el pensamiento. Fíjate cómo los colores fuertes se concentran a los lados (sobre C3 y C4), que corresponden a la corteza motora. Blanco: el electrodo aporta puro ruido para esta tarea y el CSP lo ha ignorado asignándole un peso cercano a cero.' },
-    { label: '¿Cuáles son los componentes más discriminativos?', desc: 'El CSP ordena los componentes por su utilidad. El Componente 0 es el más discriminativo para la mano izquierda (su autovalor λ es cercano a 1), mientras que el último componente lo es para la mano derecha (su autovalor λ es cercano a 0). Los componentes intermedios contienen información redundante y se descartan para evitar que el sistema se confunda.' },
-    { label: 'La ecuación Z = W·X', desc: 'Resume toda la etapa: X es la señal de entrada (canales × tiempo), W es la matriz de filtros que ves como mapas, y Z son las «señales virtuales» resultantes. Pulsa cada letra en el widget de la ecuación para ver qué representa; al pulsar W aparece literalmente la matriz de pesos.' },
-    { label: 'Cruda vs filtrada', desc: 'El gráfico de señal compara un electrodo crudo (ruidoso) con la salida del componente CSP (Z): la misma actividad, pero con el ruido de fondo de los demás canales cancelado. Ambas se muestran normalizadas para comparar su forma, no su amplitud.' },
+    { label: 'Filtro espacial (CSP)', desc: 'Combina los electrodos para que la diferencia de energía entre imaginar una mano y la otra se note al máximo. Cada topomapa es uno de esos filtros: los colores fuertes (típicamente sobre C3/C4, la corteza motora) marcan los electrodos que más pesan; el blanco, los que aporta poco. El número λ sale del problema de autovalores generalizados e indica a qué mano responde el componente (λ≈1 una, λ≈0 la otra).' },
+    { label: 'Características (log-varianza)', desc: 'Un clasificador no entiende ondas, solo números. Por eso cada componente del CSP se resume en su log-varianza (su energía). Así cada intento se vuelve un punto: si las nubes de cada mano se separan, las clases son distinguibles; si se mezclan, habrá errores.' },
+    { label: 'Clasificación (LDA)', desc: 'Traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.' },
+    { label: 'Validación honesta', desc: 'El accuracy y la matriz de confusión se calculan sobre la partición held-out: intentos que el modelo nunca vio durante el entrenamiento. κ (kappa) corrige el acierto por azar (0 = azar, 1 = perfecto).' },
   ],
-  terms: ['CSP', 'Filtro espacial', 'Whitening', 'Problema de autovalores generalizados'],
-}
-
-const HELP_LOGVAR: HelpContent = {
-  pipeline: 'Etapa 4 del pipeline · Extracción de características',
-  intro: '¿Cómo interpretar este gráfico de dispersión? Cada punto en el plano representa un trial (un intento de imaginación de ~3 segundos), situado por la energía de dos componentes CSP.',
-  points: [
-    { label: 'Eje X', desc: 'Representa la energía (log-varianza) detectada por el filtro de la mano izquierda (componente 0).' },
-    { label: 'Eje Y', desc: 'Representa la energía (log-varianza) detectada por el filtro de la mano derecha (el último componente).' },
-    { label: 'El objetivo: separabilidad', desc: 'Buscamos la separabilidad. Si los puntos de una clase se agrupan en un extremo y los de la otra en el opuesto, significa que el preprocesamiento fue exitoso y el modelo podrá clasificar los pensamientos con alta precisión. Si las nubes están muy mezcladas en el centro, el clasificador cometerá errores.' },
-    { label: 'Por qué el logaritmo', desc: 'La varianza pura tiene escalas muy dispares entre componentes; el logaritmo natural las normaliza y hace la distribución más gaussiana, que es justo lo que el clasificador lineal (LDA) espera. Cada número f_i es una coordenada del punto.' },
-  ],
-  terms: ['Varianza y log-varianza', 'CSP', 'Accuracy y kappa'],
-}
-
-const HELP_LDA: HelpContent = {
-  pipeline: 'Etapa 5 del pipeline · Clasificación lineal (LDA)',
-  intro: '¿Cómo interpretar el clasificador LDA? La línea continua del gráfico representa la «frontera de decisión» calculada por el LDA durante el entrenamiento; divide el plano en dos regiones de comando.',
-  points: [
-    { label: 'Región azul → Mano Izquierda', desc: 'Cualquier punto que caiga en la región sombreada de azul se clasifica automáticamente como Mano Izquierda. En vivo, basta con ver de qué lado de la línea cae el punto para emitir el comando.' },
-    { label: 'Región roja → Mano Derecha', desc: 'Cualquier punto en la región roja se clasifica como Mano Derecha. La frontera es una recta porque el LDA es un clasificador lineal (un hiperplano en el espacio de características).' },
-    { label: 'Métricas de éxito (Accuracy)', desc: 'El Accuracy te dice el porcentaje de intentos que el LDA clasificó correctamente sobre la partición held-out (datos que nunca vio). Un valor superior al 70% se considera apto para controlar una aplicación BCI en vivo.' },
-    { label: 'Matriz de confusión', desc: 'Muestra cuántas manos izquierdas reales se clasificaron como derechas y viceversa. La diagonal son los aciertos; fuera de la diagonal, las confusiones. κ (kappa) corrige el acierto por azar (0 = azar, 1 = perfecto).' },
-    { label: 'La fórmula y = w·F + b', desc: 'Resume la decisión: F es el vector de características (log-varianzas), w son los pesos del LDA y b el sesgo. Si y > 0 la decisión es izquierda; si y ≤ 0, derecha. La frontera es justo donde y = 0.' },
-  ],
-  terms: ['LDA', 'Frontera de decisión / hiperplano', 'Accuracy y kappa', 'Matriz de confusión'],
+  terms: ['CSP', 'Filtro espacial', 'Problema de autovalores generalizados', 'Varianza y log-varianza', 'LDA', 'Frontera de decisión / hiperplano', 'Held-out (partición reservada)', 'Accuracy, Matriz de confusión y Kappa de Cohen'],
 }
 
 const HELP_EEGNET: HelpContent = {
@@ -614,6 +589,165 @@ function ValidationCards({ lda, cfg }: { lda: LdaResp; cfg: TrainConfig | null }
   )
 }
 
+// --- Diagrama del recorrido de la señal (espejo del de EEGNet) -------------
+/** Esquema cronológico de las 4 etapas lineales del modelo clásico. */
+function PipelineDiagram({ nCh, nComp, nClasses }: { nCh: number; nComp: number; nClasses: number }) {
+  const stages = [
+    { name: 'Entrada', sub: `${nCh} canales × tiempo`, eq: 'EEG filtrado en µ/β', color: 'var(--accent-signal)' },
+    { name: 'Filtro espacial (CSP)', sub: `${nComp} componentes`, eq: 'combina los electrodos', color: 'var(--accent-csp)' },
+    { name: 'Log-varianza', sub: `${nComp} números`, eq: 'energía por componente', color: 'var(--accent-metric)' },
+    { name: 'Clasificación (LDA)', sub: `${nClasses} clases`, eq: 'frontera de decisión', color: 'var(--accent-metric)' },
+  ]
+  return (
+    <div className="flex items-stretch gap-1.5 overflow-x-auto pb-1">
+      {stages.map((s, i) => (
+        <Fragment key={s.name}>
+          <div
+            className="flex min-w-[8rem] flex-1 flex-col rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm"
+            style={{ borderTop: `3px solid ${s.color}` }}
+          >
+            <div className="text-xs font-semibold text-slate-700">{s.name}</div>
+            <div className="mt-0.5 font-mono text-[10px] leading-tight text-slate-500">{s.sub}</div>
+            <div className="mt-auto pt-2 text-[10px] italic leading-tight text-slate-400">{s.eq}</div>
+          </div>
+          {i < stages.length - 1 && <div className="flex shrink-0 items-center text-lg text-slate-300">→</div>}
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+// --- Scatter de separabilidad (sin frontera; la frontera va en la etapa LDA) -
+function SeparabilityScatter({ csp }: { csp: CSPResp }) {
+  const last = csp.features[0].length - 1
+  const byClass = csp.classes.map((cls) =>
+    csp.features.filter((_, i) => csp.labels[i] === cls).map((f) => ({ x: f[0], y: f[last] })),
+  )
+  return (
+    <div className="flex h-full flex-col">
+      <p className="mb-1 text-[11px] leading-snug text-slate-500">
+        Cada punto es un <strong>trial</strong>. Eje X = energía del <strong>comp 0</strong> (sube con{' '}
+        <span style={{ color: CLASS_COLORS[0] }}>{csp.classes[0]}</span>); eje Y = <strong>comp {last}</strong> (sube con{' '}
+        <span style={{ color: CLASS_COLORS[1] }}>{csp.classes[1]}</span>). Si las dos nubes se <strong>separan</strong>, las clases son distinguibles.
+      </p>
+      <div className="min-h-0 flex-1">
+        <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+          <ScatterChart margin={{ top: 4, right: 12, bottom: 26, left: 4 }}>
+            <CartesianGrid stroke="#eef2f7" />
+            <XAxis type="number" dataKey="x" name="log-var comp 0" tick={{ fontSize: 11 }}
+              label={{ value: `log-var comp 0  →  ${csp.classes[0]}`, position: 'bottom', fontSize: 10, fill: '#94a3b8' }} />
+            <YAxis type="number" dataKey="y" name={`log-var comp ${last}`} tick={{ fontSize: 11 }}
+              label={{ value: `comp ${last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
+            <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+            <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
+            {byClass.map((pts, i) => (
+              <Scatter key={i} name={csp.classes[i]} data={pts} fill={CLASS_COLORS[i % CLASS_COLORS.length]} fillOpacity={0.6} />
+            ))}
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+// --- Flujo cronológico del modelo clásico (CSP → log-varianza → LDA) --------
+/** Reemplaza los antiguos 3 GridBoards: un único recorrido en cajas, en orden,
+ *  con explicaciones concisas (los términos se auto-enlazan al glosario). */
+function CspLdaPipeline({ dataset, subject, csp, lda, cfg }: {
+  dataset: string; subject: number; csp: CSPResp; lda: LdaResp | null; cfg: TrainConfig | null
+}) {
+  // qué clase resalta cada componente: λ alto (≥0.5) → primera clase; λ bajo → segunda.
+  const favoredClass = (ci: number) => (csp.eigenvalues[ci] >= 0.5 ? csp.classes[0] : csp.classes[1])
+
+  return (
+    <div className="space-y-4">
+      {/* 0 · Recorrido de la señal (ancla la cronología) */}
+      <Widget title="El recorrido de la señal" accent="brain">
+        <PipelineDiagram nCh={csp.channels.length} nComp={csp.filters.length} nClasses={csp.classes.length} />
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          <GlossaryText>Cada intento de imaginación motora recorre cuatro etapas, todas operaciones lineales. La señal ya llega filtrada en la banda µ/β; desde ahí el CSP combina los electrodos, la log-varianza resume cada componente en un número y el LDA decide. Abajo se ve cada etapa en orden, con datos reales del sujeto.</GlossaryText>
+        </p>
+      </Widget>
+
+      {/* 1 · Filtro espacial (CSP): mapas + ecuación */}
+      <Widget title="Filtro espacial (CSP)" accent="csp">
+        <p className="mb-3 text-xs leading-relaxed text-slate-500">
+          <GlossaryText>El casco capta una mezcla de toda la actividad cerebral. El CSP funciona como un lente: combina los electrodos para que la diferencia entre imaginar la mano izquierda y la derecha resalte al máximo. Cada topomapa es uno de esos filtros espaciales y los colores fuertes marcan los electrodos que más pesan. El número λ sale del problema de autovalores generalizados e indica a qué mano responde cada componente (λ≈1 una, λ≈0 la otra).</GlossaryText>
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <div className="mb-2 text-sm font-medium text-slate-600">Mapas topográficos (un filtro por componente)</div>
+            <div className="flex flex-wrap content-start justify-around gap-2">
+              {csp.patterns.map((pat, ci) => (
+                <div key={ci} className="text-center">
+                  <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={130} />
+                  <div className="text-sm font-medium text-slate-700">comp {ci}</div>
+                  <div className="text-xs text-slate-500">
+                    favorece <span style={{ color: CLASS_COLORS[csp.eigenvalues[ci] >= 0.5 ? 0 : 1] }}>{favoredClass(ci)}</span>
+                  </div>
+                  <div className="font-mono text-[11px] text-slate-400">λ = {csp.eigenvalues[ci].toFixed(2)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="min-h-[320px]">
+            <div className="mb-2 text-sm font-medium text-slate-600">Ecuación de proyección  Z = W·X</div>
+            <CspEquation csp={csp} />
+          </div>
+        </div>
+      </Widget>
+
+      {/* 2 · Señal cruda vs filtrada por CSP */}
+      <Widget title="Señal: cruda vs filtrada por CSP" accent="csp">
+        <p className="mb-2 text-xs leading-relaxed text-slate-500">
+          <GlossaryText>Comparamos un electrodo tal cual (ruidoso) con la salida de un componente CSP: la misma actividad, pero con el ruido de los demás canales cancelado. Ambas se normalizan para comparar su forma, no su amplitud.</GlossaryText>
+        </p>
+        <div className="h-72">
+          <SignalCompare dataset={dataset} subject={subject} nComp={csp.filters.length} />
+        </div>
+      </Widget>
+
+      {/* 3 · Características (log-varianza): fórmula + scatter */}
+      <Widget title="Características (log-varianza)" accent="metric">
+        <p className="mb-3 text-xs leading-relaxed text-slate-500">
+          <GlossaryText>Un clasificador no entiende ondas, solo números. Por eso resumimos cada componente del CSP en su log-varianza (cuánta energía tiene). Así cada intento se vuelve un punto: si los puntos de cada mano se separan, el modelo podrá distinguirlas.</GlossaryText>
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="min-h-[260px]"><LogVarFormula /></div>
+          <div className="min-h-[260px]"><SeparabilityScatter csp={csp} /></div>
+        </div>
+      </Widget>
+
+      {/* 4 · Clasificación (LDA): frontera + regla + validación */}
+      {lda ? (
+        <>
+          <Widget title="Clasificación (LDA)" accent="metric">
+            <p className="mb-3 text-xs leading-relaxed text-slate-500">
+              <GlossaryText>El LDA traza una frontera de decisión recta (un hiperplano) que parte el espacio en dos regiones, una por mano. En vivo, la decisión es simplemente de qué lado cae el punto.</GlossaryText>
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="min-h-[280px]"><DecisionScatter csp={csp} lda={lda} /></div>
+              <div className="min-h-[280px]"><LdaFormula lda={lda} classes={csp.classes} /></div>
+            </div>
+          </Widget>
+
+          <Widget title="Validación (held-out)" accent="metric">
+            <p className="mb-3 text-xs leading-relaxed text-slate-500">
+              <GlossaryText>Para saber si funciona, lo probamos con intentos que el modelo nunca vio durante el entrenamiento (partición held-out). El accuracy es el porcentaje de aciertos y la matriz de confusión muestra dónde se equivoca.</GlossaryText>
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="min-h-[260px]"><ValidationCards lda={lda} cfg={cfg} /></div>
+              <div className="min-h-[260px]"><ConfusionMatrix lda={lda} /></div>
+            </div>
+          </Widget>
+        </>
+      ) : (
+        <div className="flex h-32 items-center justify-center text-slate-300">Calculando frontera de decisión…</div>
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 export default function SpatialCSP() {
   const [datasets, setDatasets] = useState<DatasetInfo[]>([])
@@ -622,7 +756,7 @@ export default function SpatialCSP() {
   const [csp, setCsp] = useState<CSPResp | null>(null)
   const [cfg, setCfg] = useState<TrainConfig | null>(null)
   const [lda, setLda] = useState<LdaResp | null>(null)
-  const [tab, setTab] = useState<'csp' | 'logvar' | 'lda' | 'eegnet'>('csp')
+  const [tab, setTab] = useState<'pipeline' | 'eegnet'>('pipeline')
 
   // Lista de datasets para el selector de página (offline = todos, no solo demo en vivo).
   useEffect(() => {
@@ -647,30 +781,10 @@ export default function SpatialCSP() {
     getJSON<LdaResp>(`/lda?dataset=${dataset}&subject=${subject}`).then(setLda).catch(() => setLda(null))
   }, [dataset, subject])
 
-  // scatter de separabilidad: componente extremo alto (0) vs bajo (último)
-  const scatter = useMemo(() => {
-    if (!csp) return null
-    const last = csp.features[0].length - 1
-    const byClass = csp.classes.map((cls) =>
-      csp.features.filter((_, i) => csp.labels[i] === cls).map((f) => ({ x: f[0], y: f[last] })),
-    )
-    return { last, byClass }
-  }, [csp])
-
-  // qué clase resalta cada componente: λ alto (≥0.5) → primera clase; λ bajo → segunda.
-  const favoredClass = (ci: number) => (csp && csp.eigenvalues[ci] >= 0.5 ? csp.classes[0] : csp?.classes[1])
-
-  const nCh = csp?.channels.length ?? cfg?.dataset.n_channels ?? 22
-  const nComp = csp?.patterns.length ?? cfg?.preprocessing.csp.n_components ?? 4
-  const introCsp = `Los electrodos del casco EEG captan una mezcla ruidosa de toda la actividad cerebral. El algoritmo de Patrones Espaciales Comunes (CSP) actúa como un lente matemático: calcula una matriz de pesos para combinar las señales de los ${nCh} canales de forma que se maximice la diferencia de energía entre la imaginación de la mano izquierda y la derecha. El sistema selecciona automáticamente los ${nComp} componentes más discriminativos.`
-
-  // Metadatos de la subsección activa (título, introducción y ayuda cambian con ella).
-  const section = {
-    csp: { name: 'Filtro espacial (CSP)', intro: introCsp, help: HELP_CSP },
-    logvar: { name: 'Extracción de características (log-varianza)', intro: INTRO_LOGVAR, help: HELP_LOGVAR },
-    lda: { name: 'Clasificación lineal (LDA)', intro: INTRO_LDA, help: HELP_LDA },
-    eegnet: { name: 'EEGNet · filtros aprendidos', intro: INTRO_EEGNET, help: HELP_EEGNET },
-  }[tab]
+  // Dos "métodos" enfrentados: el modelo clásico (CSP+LDA) y el aprendido (EEGNet).
+  const section = tab === 'eegnet'
+    ? { name: 'EEGNet', intro: INTRO_EEGNET, help: HELP_EEGNET }
+    : { name: 'CSP + LDA', intro: 'El modelo clásico paso a paso: del filtro espacial a la decisión, en orden.', help: HELP_PIPELINE }
 
   return (
     <PageShell
@@ -697,9 +811,9 @@ export default function SpatialCSP() {
         </Collapsible>
       </div>
 
-      {/* Selector de subsecciones (etapas del pipeline + comparación EEGNet) */}
+      {/* Selector de método: modelo clásico (flujo único) vs EEGNet */}
       <div className="mb-4 flex rounded-md border border-slate-300 p-0.5 text-sm w-fit">
-        {([['csp', 'Filtro espacial (CSP)'], ['logvar', 'Características (log-var)'], ['lda', 'Clasificación (LDA)'], ['eegnet', 'EEGNet']] as const).map(([id, label]) => (
+        {([['pipeline', 'CSP + LDA'], ['eegnet', 'EEGNet']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`rounded px-3 py-1 ${tab === id ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
             {label}
@@ -711,134 +825,8 @@ export default function SpatialCSP() {
         <EEGNetModel dataset={dataset} subject={subject} csp={csp} />
       ) : !csp ? (
         <div className="flex h-64 items-center justify-center text-slate-300">Calculando CSP…</div>
-      ) : tab === 'logvar' ? (
-        <GridBoard
-          storageKey="logvarLayout-v1"
-          widgets={[
-            {
-              i: 'formula',
-              title: 'Cálculo: log-varianza por componente',
-              accent: 'csp',
-              w: 4, h: 6, minW: 3, minH: 4,
-              el: <LogVarFormula />,
-            },
-            {
-              i: 'scatter',
-              title: 'Separabilidad de clases (espacio de características)',
-              accent: 'csp',
-              w: 8, h: 6, minW: 4, minH: 4,
-              el: scatter ? (
-                <div className="flex h-full flex-col">
-                  <p className="mb-1 text-[11px] leading-snug text-slate-500">
-                    Cada punto es un <strong>trial</strong>. Eje X = energía del <strong>comp 0</strong> (sube con{' '}
-                    <span style={{ color: CLASS_COLORS[0] }}>{csp.classes[0]}</span>); eje Y = <strong>comp {scatter.last}</strong> (sube con{' '}
-                    <span style={{ color: CLASS_COLORS[1] }}>{csp.classes[1]}</span>). Si las dos nubes se <strong>separan</strong>, las clases son distinguibles.
-                  </p>
-                  <div className="min-h-0 flex-1">
-                    <ResponsiveContainer width="100%" height="100%" minHeight={160}>
-                      <ScatterChart margin={{ top: 4, right: 12, bottom: 26, left: 4 }}>
-                        <CartesianGrid stroke="#eef2f7" />
-                        <XAxis type="number" dataKey="x" name="log-var comp 0" tick={{ fontSize: 11 }}
-                          label={{ value: `log-var comp 0  →  ${csp.classes[0]}`, position: 'bottom', fontSize: 10, fill: '#94a3b8' }} />
-                        <YAxis type="number" dataKey="y" name={`log-var comp ${scatter.last}`} tick={{ fontSize: 11 }}
-                          label={{ value: `comp ${scatter.last} → ${csp.classes[1]}`, angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }} />
-                        <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                        <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
-                        {scatter.byClass.map((pts, i) => (
-                          <Scatter key={i} name={csp.classes[i]} data={pts} fill={CLASS_COLORS[i % CLASS_COLORS.length]} fillOpacity={0.6} />
-                        ))}
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : <div />,
-            } satisfies GridWidget,
-          ]}
-        />
-      ) : tab === 'lda' ? (
-        !lda ? (
-          <div className="flex h-64 items-center justify-center text-slate-300">Calculando frontera de decisión…</div>
-        ) : (
-          <GridBoard
-            storageKey="ldaLayout-v1"
-            widgets={[
-              {
-                i: 'boundary',
-                title: 'Frontera de decisión sobre el espacio de características',
-                accent: 'metric',
-                w: 8, h: 6, minW: 4, minH: 4,
-                el: <DecisionScatter csp={csp} lda={lda} />,
-              },
-              {
-                i: 'formula',
-                title: 'Regla del clasificador  y = w·F + b',
-                accent: 'metric',
-                w: 4, h: 6, minW: 3, minH: 4,
-                el: <LdaFormula lda={lda} classes={csp.classes} />,
-              },
-              {
-                i: 'metrics',
-                title: 'Métricas de entrenamiento (validación)',
-                accent: 'metric',
-                w: 6, h: 5, minW: 4, minH: 4,
-                el: <ValidationCards lda={lda} cfg={cfg} />,
-              },
-              {
-                i: 'confusion',
-                title: 'Matriz de confusión (held-out)',
-                accent: 'metric',
-                w: 6, h: 5, minW: 4, minH: 4,
-                el: <ConfusionMatrix lda={lda} />,
-              } satisfies GridWidget,
-            ]}
-          />
-        )
       ) : (
-        <GridBoard
-          storageKey="cspLayout-v4"
-          widgets={[
-            {
-              i: 'patterns',
-              title: 'Mapas topográficos  (un filtro por componente)',
-              accent: 'csp',
-              w: 8, h: 6, minW: 4, minH: 4,
-              el: (
-                <div className="flex h-full flex-col">
-                  <p className="mb-2 text-[11px] leading-snug text-slate-500">
-                    Cada mapa es un <strong>filtro espacial</strong> (cómo combina los electrodos). Su autovalor <span className="font-mono">λ</span> dice a qué clase
-                    responde: <span className="font-mono">λ≈1</span> resalta una mano y <span className="font-mono">λ≈0</span> la otra. Los más útiles se lateralizan sobre C3/C4 (corteza motora).
-                  </p>
-                  <div className="flex flex-1 flex-wrap content-start justify-around gap-2">
-                    {csp.patterns.map((pat, ci) => (
-                      <div key={ci} className="text-center">
-                        <Topomap channels={csp.channels} pos2d={csp.pos2d} values={pat} size={150} />
-                        <div className="text-sm font-medium text-slate-700">comp {ci}</div>
-                        <div className="text-xs text-slate-500">
-                          favorece <span style={{ color: CLASS_COLORS[csp.eigenvalues[ci] >= 0.5 ? 0 : 1] }}>{favoredClass(ci)}</span>
-                        </div>
-                        <div className="font-mono text-[11px] text-slate-400">λ = {csp.eigenvalues[ci].toFixed(2)}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ),
-            },
-            {
-              i: 'equation',
-              title: 'Ecuación de proyección  Z = W·X',
-              accent: 'csp',
-              w: 4, h: 6, minW: 3, minH: 4,
-              el: <CspEquation csp={csp} />,
-            },
-            {
-              i: 'signal',
-              title: 'Señal: cruda vs filtrada por CSP',
-              accent: 'csp',
-              w: 12, h: 5, minW: 4, minH: 4,
-              el: <SignalCompare dataset={dataset} subject={subject} nComp={csp.filters.length} />,
-            } satisfies GridWidget,
-          ]}
-        />
+        <CspLdaPipeline dataset={dataset} subject={subject} csp={csp} lda={lda} cfg={cfg} />
       )}
     </PageShell>
   )
