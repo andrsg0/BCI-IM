@@ -33,6 +33,7 @@ import numpy as np
 from bci.config import BACKEND_ROOT, load_config, resolve_path
 from bci.dsp.convolution import apply_filter
 from bci.dsp.fir_filters import design_from_config
+from bci.dsp.frequency_response import frequency_response
 from bci.features.log_variance import log_variance
 from bci.models.lda import LDA
 from bci.spatial.csp import CSP
@@ -124,6 +125,97 @@ def fig_epoching(cfg: dict, fs: float) -> None:
     _save(fig, "01-epoching.png")
 
 
+def fig_eegnet(cfg: dict, dataset: str, subject: int, filt, ch: list[str]) -> None:
+    """EEGNet como espejo: filtros temporales/espaciales APRENDIDOS vs FIR/CSP a mano.
+
+    Carga el modelo EEGNet ya persistido (no reentrena). Si no existe (o no hay
+    torch), se omite con un aviso, para no romper la generación del resto.
+    """
+    from bci.pipeline.training import load_model, model_paths
+
+    pkl, _ = model_paths(resolve_path(cfg["paths"]["processed"]), dataset, subject, "eegnet")
+    if not pkl.exists():
+        print(f"  · (omito EEGNet: no existe {pkl.name}; entrena con train_eegnet.py)")
+        return
+    try:
+        clf = load_model(pkl)
+        mdl = clf.model
+    except Exception as e:  # noqa: BLE001
+        print(f"  · (omito EEGNet: no se pudo cargar el modelo: {e})")
+        return
+
+    Wt = mdl.temporal[0].weight.detach().cpu().numpy()[:, 0, 0, :]   # (F1, kern)
+    Ws = mdl.spatial[0].weight.detach().cpu().numpy()[:, 0, :, 0]    # (F1*D, n_canales)
+    fs = filt.fs   # misma frecuencia de muestreo que el FIR a mano
+
+    # --- (1) Respuesta en frecuencia: filtros temporales aprendidos vs FIR ---
+    fr0 = frequency_response(Wt[0], fs, n_freqs=256)
+    freqs = fr0.freqs_hz
+    fig, ax = plt.subplots(figsize=(7.2, 4.0))
+    ax.axvspan(8, 30, color="#059669", alpha=0.12, label="banda µ/β (FIR a mano)")
+    for h in Wt:
+        mag = frequency_response(h, fs, n_freqs=256).magnitude
+        ax.plot(freqs, mag / (mag.max() + 1e-12), color="#7c3aed", alpha=0.5, lw=1.2)
+    # el FIR a mano, normalizado, para comparar
+    fr_fir = frequency_response(filt.h, fs, n_freqs=256)
+    mfir = fr_fir.magnitude
+    ax.plot(fr_fir.freqs_hz, mfir / (mfir.max() + 1e-12), color="#0891b2", lw=2.4,
+            label="FIR diseñado a mano")
+    ax.plot([], [], color="#7c3aed", alpha=0.6, lw=1.2, label="filtros temporales aprendidos (EEGNet)")
+    ax.set_xlim(0, 45); ax.set_ylim(0, 1.05)
+    ax.set_xlabel("Frecuencia (Hz)"); ax.set_ylabel("|H| (normalizado)")
+    ax.set_title("Filtros temporales aprendidos (EEGNet) vs FIR a mano")
+    ax.legend(fontsize=8.5, loc="upper right")
+    ax.grid(alpha=0.25)
+    _save(fig, "05-eegnet-temporal.png")
+
+    # --- (2) Filtros espaciales aprendidos como topomapas (≈ CSP) ------------
+    # Tomamos los 4 primeros para no saturar; Ws es (F1*D, n_canales) -> columnas.
+    k = min(4, Ws.shape[0])
+    _save(plot_csp_patterns(Ws[:k].T, ch, title="Filtros espaciales aprendidos (EEGNet ≈ CSP)"),
+          "05-eegnet-spatial.png")
+
+
+def fig_results(cfg: dict) -> None:
+    """Comparación de los 4 regímenes (CSP/EEGNet × within/cross) por dataset.
+
+    Lee los ``compare_methods_<id>.csv` ya producidos por la evaluación (no recalcula).
+    Barras = accuracy media por régimen; la línea punteada es el azar (0.5).
+    """
+    processed = resolve_path(cfg["paths"]["processed"])
+    datasets = [("BNCI2014_001", "BCI IV 2a"), ("BNCI2014_004", "BCI IV 2b"), ("Kumar2024", "Kumar2024")]
+    regimes = [("csp_within", "CSP within"), ("eegnet_within", "EEGNet within"),
+               ("csp_cross", "CSP cross"), ("eegnet_cross", "EEGNet cross")]
+    colors = ["#7c3aed", "#d97706", "#a78bfa", "#fbbf24"]
+
+    import csv as _csv
+    means: dict[str, list[float]] = {}
+    for ds_id, _ in datasets:
+        p = processed / f"compare_methods_{ds_id}.csv"
+        if not p.exists():
+            print(f"  · (omito Resultados: falta {p.name})")
+            return
+        with p.open() as fh:
+            rows = list(_csv.DictReader(fh))
+        means[ds_id] = [float(np.mean([float(r[col]) for r in rows if r.get(col)]))
+                        for col, _ in regimes]
+
+    x = np.arange(len(datasets))
+    w = 0.2
+    fig, ax = plt.subplots(figsize=(8.5, 4.4))
+    for j, (col, lab) in enumerate(regimes):
+        vals = [means[ds_id][j] for ds_id, _ in datasets]
+        ax.bar(x + (j - 1.5) * w, vals, w, label=lab, color=colors[j])
+    ax.axhline(0.5, ls="--", color="#94a3b8", lw=1, label="azar (0.5)")
+    ax.set_xticks(x); ax.set_xticklabels([lbl for _, lbl in datasets])
+    ax.set_ylabel("Accuracy media (held-out honesto)")
+    ax.set_ylim(0, 0.8)
+    ax.set_title("Los 4 regímenes por dataset (within vs cross · CSP vs EEGNet)")
+    ax.legend(fontsize=8.5, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.12))
+    ax.grid(axis="y", alpha=0.25)
+    _save(fig, "06-regimenes.png")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(BACKEND_ROOT.parent / "configs" / "default.yaml"))
@@ -196,6 +288,12 @@ def main() -> None:
     ax.legend(fontsize=9)
     ax.grid(alpha=0.25)
     _save(fig, "04-lda-boundary.png")
+
+    # --- EEGNet (sección 5): filtros aprendidos vs FIR/CSP a mano -----------
+    fig_eegnet(cfg, cfg["dataset"]["name"], args.subject, filt, ch)
+
+    # --- Resultados (sección 6): comparación de los 4 regímenes -------------
+    fig_results(cfg)
 
     fig_pipeline()
     fig_epoching(cfg, fs)
