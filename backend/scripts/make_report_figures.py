@@ -152,8 +152,13 @@ def main() -> None:
     ci = ch.index("C3") if "C3" in ch else 0
     _save(plot_filter_effect(X[0, ci], Xf[0, ci], fs), "02-filter-effect.png")
 
-    # MAC sobre una señal de juguete + el propio h (didáctico)
-    _save(plot_mac_operation(X[0, ci, :60], filt.h, len(filt.h)), "02-mac.png")
+    # MAC didáctico: señal de juguete (seno) + kernel corto de suavizado, escalas
+    # comparables y solape completo en n=20 (la señal cruda es minúscula frente a h).
+    t_toy = np.arange(40)
+    x_toy = np.sin(2 * np.pi * t_toy / 12)
+    w9 = np.hamming(9)
+    h_toy = w9 / w9.sum()
+    _save(plot_mac_operation(x_toy, h_toy, 20), "02-mac.png")
 
     # --- CSP (sección 3) -----------------------------------------------------
     csp = CSP(n_components=cfg["csp"]["n_components"], shrinkage=cfg["csp"].get("shrinkage", 0.0)).fit(Xf, y)
