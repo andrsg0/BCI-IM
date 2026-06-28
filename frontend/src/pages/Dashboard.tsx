@@ -11,6 +11,7 @@ import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { RecentTrialsStrip, type TrialOutcome } from '../components/RecentTrials'
 import { motorLaterality } from '../lib/electrodes'
+import { drawActiveBands } from '../lib/chartBands'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
@@ -261,22 +262,31 @@ function SignalTrace({ kind }: { kind: 'raw' | 'filt' }) {
 function ConfidenceTrace() {
   const { subscribe, resetKey } = useLive()
   const u = useRef<uPlot | null>(null)
-  const buf = useRef<{ t: number[]; a: number[]; b: number[] }>({ t: [], a: [], b: [] })
+  const buf = useRef<{ t: number[]; a: number[]; b: number[]; act: boolean[] }>({ t: [], a: [], b: [], act: [] })
   const k = useRef(0)
-  useEffect(() => { buf.current = { t: [], a: [], b: [] }; k.current = 0; u.current?.setData([[], [], []]) }, [resetKey])
+  useEffect(() => { buf.current = { t: [], a: [], b: [], act: [] }; k.current = 0; u.current?.setData([[], [], []]) }, [resetKey])
   useEffect(() => subscribe((m) => {
     const cls = Object.keys(m.probs)
+    const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
     const h = buf.current
-    h.t.push(k.current * 0.1); h.a.push(m.probs[cls[0]] ?? 0); h.b.push(m.probs[cls[1]] ?? 0); k.current++
-    if (h.t.length > 250) { h.t.shift(); h.a.shift(); h.b.shift() }
+    h.t.push(k.current * 0.1); h.a.push(m.probs[cls[0]] ?? 0); h.b.push(m.probs[cls[1]] ?? 0); h.act.push(active); k.current++
+    if (h.t.length > 250) { h.t.shift(); h.a.shift(); h.b.shift(); h.act.shift() }
     u.current?.setData([h.t, h.a, h.b])
   }), [subscribe])
   const opts = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
     legend: { show: false }, cursor: { show: false }, scales: { x: { time: false }, y: { range: [0, 1] } },
     axes: [axis('Tiempo (s)'), axis('probabilidad')],
     series: [{}, { stroke: CLASS_COLORS[0], width: 1.6 }, { stroke: CLASS_COLORS[1], width: 1.6 }],
+    plugins: [{ hooks: { drawClear: (x: uPlot) => drawActiveBands(x, buf.current.act) } }],
   }), [])
-  return <FillChart data={EMPTY3} options={opts} onCreate={(x) => (u.current = x)} />
+  return (
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1"><FillChart data={EMPTY3} options={opts} onCreate={(x) => (u.current = x)} /></div>
+      <p className="pt-1 text-[11px] leading-snug text-slate-400">
+        Banda <span className="font-medium text-emerald-600">verde</span> = franja de imaginación real (verdad de terreno).
+      </p>
+    </div>
+  )
 }
 
 function DecisionSummary() {

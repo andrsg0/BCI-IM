@@ -8,6 +8,7 @@ import { FillChart } from '../components/charts/FillChart'
 import { CSPSpaceLive, LDAAxisLive, type CSPHandle, type LDAHandle } from '../components/charts/PipelineStages'
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { RecentTrialsStrip, type TrialOutcome } from '../components/RecentTrials'
+import { drawActiveBands } from '../lib/chartBands'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
 import { progressFromFrame, type ProgressFrame } from '../lib/progress'
@@ -137,7 +138,7 @@ export default function LiveStream() {
     return { colors, cspCloud, ldaCloud, classes: cls, xLabel, yLabel }
   }, [csp])
 
-  const hist = useRef({ ts: [] as number[], a: [] as number[], b: [] as number[] })
+  const hist = useRef({ ts: [] as number[], a: [] as number[], b: [] as number[], act: [] as boolean[] })
   const kRef = useRef(0)
   const chartU = useRef<uPlot | null>(null)
   // vistas imperativas de las etapas (no re-renderizan a 10 Hz; solo mueven el punto)
@@ -148,7 +149,7 @@ export default function LiveStream() {
 
   // limpiar
   useEffect(() => {
-    hist.current = { ts: [], a: [], b: [] }; kRef.current = 0
+    hist.current = { ts: [], a: [], b: [], act: [] }; kRef.current = 0
     buf.current = { trial: null, t: '', votes: {}, n: 0 }
     ewma.current = {}; pActEwma.current = null
     filtBuf.current = []
@@ -175,10 +176,13 @@ export default function LiveStream() {
       if (prog) useStore.getState().setProgress(prog[0], prog[1])
       setClasses((c) => (c.length ? c : Object.keys(m.probs)))
       const cls = Object.keys(m.probs)
+      // `active` = verdad de terreno (la persona realmente imaginaba en esta ventana).
+      // NO decide nada: puntúa el acierto, mueve el muñeco y pinta la banda del gráfico.
+      const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
       const h = hist.current
       const k = kRef.current++
-      h.ts.push(k * 0.1); h.a.push(m.probs[cls[0]] ?? 0); h.b.push(m.probs[cls[1]] ?? 0)
-      if (h.ts.length > 200) { h.ts.shift(); h.a.shift(); h.b.shift() }
+      h.ts.push(k * 0.1); h.a.push(m.probs[cls[0]] ?? 0); h.b.push(m.probs[cls[1]] ?? 0); h.act.push(active)
+      if (h.ts.length > 200) { h.ts.shift(); h.a.shift(); h.b.shift(); h.act.shift() }
       chartU.current?.setData([h.ts, h.a, h.b])
       setLast(m)
 
@@ -209,9 +213,6 @@ export default function LiveStream() {
       if (typeof m.p_act === 'number') pActEwma.current = ALPHA * m.p_act + (1 - ALPHA) * (pActEwma.current ?? m.p_act)
       const passGate = !restGateRef.current || m.p_act == null || (pActEwma.current ?? 1) >= 0.5
       const committed = emaConf >= thresholdRef.current && passGate
-      // `active` = verdad de terreno (franja de imaginación real). NO decide nada: solo
-      // sirve para puntuar el acierto y distinguir compromisos válidos de falsas alarmas.
-      const active = m.alo == null || m.ahi == null || (m.t >= m.alo && m.t <= m.ahi)
       setCur({ trial: m.trial, t: m['true'], pred: emaPred, conf: emaConf, committed, active })
 
       // Cambió de trial: finalizamos el anterior contando los compromisos en su franja
@@ -250,6 +251,7 @@ export default function LiveStream() {
       { stroke: '#94a3b8', grid: { stroke: '#eef2f7', width: 1 }, font: '11px Geist Variable' },
     ],
     series: [{}, { stroke: CLASS_COLORS[0], width: 1.6 }, { stroke: CLASS_COLORS[1], width: 1.6 }],
+    plugins: [{ hooks: { drawClear: (u: uPlot) => drawActiveBands(u, hist.current.act) } }],
   }), [])
   const filtOptions = useMemo<Omit<uPlot.Options, 'width' | 'height'>>(() => ({
     legend: { show: false }, cursor: { show: false },
@@ -380,7 +382,14 @@ export default function LiveStream() {
     },
     {
       i: 'evolution', title: 'Evolución de la confianza (últimas ventanas)', accent: 'signal', w: 12, h: 5, minW: 4, minH: 3,
-      el: <FillChart data={EMPTY} options={chartOptions} onCreate={(u) => (chartU.current = u)} />,
+      el: (
+        <div className="flex h-full flex-col">
+          <div className="min-h-0 flex-1"><FillChart data={EMPTY} options={chartOptions} onCreate={(u) => (chartU.current = u)} /></div>
+          <p className="pt-1 text-[11px] leading-snug text-slate-400">
+            La banda <span className="font-medium text-emerald-600">verde</span> es la franja de imaginación real (verdad de terreno): ahí se mueve el muñeco. La confianza suele cambiar <strong>antes</strong> porque la ventana de 2&nbsp;s ya "ve" parte de la imaginación.
+          </p>
+        </div>
+      ),
     },
   ]
 
