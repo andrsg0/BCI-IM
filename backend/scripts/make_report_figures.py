@@ -176,6 +176,61 @@ def fig_eegnet(cfg: dict, dataset: str, subject: int, filt, ch: list[str]) -> No
           "05-eegnet-spatial.png")
 
 
+def fig_streaming(cfg: dict, fs: float) -> None:
+    """Esquema del streaming causal: reposo pre-cue + ventana deslizante + banda activa.
+
+    Explica visualmente dos cosas: (1) la señal llega sin fronteras de trial (hay reposo
+    antes del cue) y (2) por qué la decisión va por detrás de la imaginación (la ventana
+    se etiqueta por su FIN pero la imaginación está en su CENTRO, más el retardo de grupo).
+    """
+    epo, cw, fir = cfg["epoching"], cfg["classification_window"], cfg["fir_filter"]
+    s = cfg["streaming"]
+    win_s, step_s = float(s["window_s"]), float(s["step_s"])
+    shift = float(s.get("demo_baseline_s", 2.0))           # reposo pre-cue añadido
+    gd = (int(fir["num_taps"]) - 1) / 2 / fs               # retardo de grupo (s)
+    # eje "wide": onset=0; cue en t=shift; activa en [shift+tmin_rel, shift+tmax_rel]
+    cue = shift
+    alo, ahi = cue + float(cw["tmin_rel"]), cue + float(cw["tmax_rel"])
+    total = ahi + 1.0
+
+    fig, ax = plt.subplots(figsize=(10.5, 3.4))
+    ax.set_xlim(-0.3, total); ax.set_ylim(0, 3.4); ax.axis("off")
+    # eje de tiempo
+    ax.annotate("", xy=(total, 0.5), xytext=(-0.2, 0.5), arrowprops=dict(arrowstyle="->", color="#94a3b8"))
+    for tt in range(0, int(total) + 1):
+        ax.plot([tt, tt], [0.44, 0.56], color="#cbd5e1")
+        ax.text(tt, 0.18, f"{tt}s", ha="center", fontsize=8, color="#64748b")
+    # reposo pre-cue
+    ax.add_patch(plt.Rectangle((0, 0.7), cue, 0.5, facecolor="#e2e8f0", edgecolor="#94a3b8", lw=1))
+    ax.text(cue / 2, 0.95, "reposo (pre-cue)\nsin imaginación", ha="center", fontsize=8, color="#475569")
+    # cue
+    ax.plot([cue, cue], [0.5, 2.9], ":", color="#7c3aed", lw=1.2)
+    ax.text(cue, 3.05, "cue (empieza a imaginar)", ha="center", fontsize=8.5, color="#5b21b6")
+    # banda activa (verdad de terreno)
+    ax.add_patch(FancyBboxPatch((alo, 0.7), ahi - alo, 0.5, boxstyle="round,pad=0.01",
+                                facecolor="#ddd6fe", edgecolor="#7c3aed", lw=1.5))
+    ax.text((alo + ahi) / 2, 0.95, "imaginación ACTIVA\n[alo, ahi]", ha="center", fontsize=8, color="#5b21b6")
+    # una ventana deslizante que termina en t_end (dentro de la activa)
+    t_end = alo + 0.6
+    t_start = t_end - win_s
+    ax.add_patch(plt.Rectangle((t_start, 1.5), win_s, 0.8, facecolor="#bae6fd", alpha=0.6,
+                               edgecolor="#0891b2", lw=1.5))
+    ax.text(t_start + 0.45, 1.9, f"ventana\n({win_s:g}s)", ha="center", fontsize=8.5, color="#075985")
+    # fin de ventana (con lo que se etiqueta 't') y su centro
+    ax.plot([t_end, t_end], [1.4, 2.3], color="#0891b2", lw=1)
+    ax.text(t_end, 1.28, "t (fin = etiqueta)", ha="center", fontsize=7.5, color="#0e7490")
+    tc = (t_start + t_end) / 2
+    ax.plot([tc, tc], [1.5, 2.3], "--", color="#0891b2", lw=1)
+    ax.text(tc, 1.28, "centro\n(imaginación)", ha="center", fontsize=7.5, color="#0e7490")
+    # flecha del desfase centro->fin (= win_s/2) + retardo de grupo
+    ax.annotate("", xy=(t_end, 2.4), xytext=(tc, 2.4),
+                arrowprops=dict(arrowstyle="<->", color="#dc2626"))
+    ax.text((tc + t_end) / 2, 2.62, f"desfase ≈ win/2 ({win_s/2:g}s)\n+ retardo grupo ({gd*1000:.0f}ms)",
+            ha="center", fontsize=7, color="#b91c1c")
+    fig.suptitle("Streaming causal: ventana deslizante sobre señal continua con reposo", fontsize=11, y=1.0)
+    _save(fig, "07-streaming.png")
+
+
 def fig_results(cfg: dict) -> None:
     """Comparación de los 4 regímenes (CSP/EEGNet × within/cross) por dataset.
 
@@ -294,6 +349,9 @@ def main() -> None:
 
     # --- Resultados (sección 6): comparación de los 4 regímenes -------------
     fig_results(cfg)
+
+    # --- Streaming (sección 7): ventana deslizante causal con reposo --------
+    fig_streaming(cfg, fs)
 
     fig_pipeline()
     fig_epoching(cfg, fs)
