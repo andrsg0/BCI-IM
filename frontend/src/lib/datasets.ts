@@ -13,7 +13,7 @@ export interface DatasetInfo {
   accuracy: number
   /** nº de sesiones reales (espejo del REGISTRY del backend). Se DERIVA de aquí si el
    *  dataset sirve para la demo en vivo: ≥2 sesiones ⇒ estimación honesta inter-sesión.
-   *  Reemplaza al antiguo campo manual 'role'. Ver docs/datasets.md. */
+   *  Reemplaza al antiguo campo manual 'role'. Ver docs/informe/01-datos.md. */
   sessions: number
 }
 

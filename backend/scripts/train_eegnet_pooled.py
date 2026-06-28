@@ -10,7 +10,7 @@ Uso:
     python scripts/train_eegnet_pooled.py --config ../configs/default.yaml --subjects 1 2 3 4 5 6 7 8 9
     python scripts/train_eegnet_pooled.py --config ../configs/default.yaml --subjects 1 2 3 --epochs 200 --no-loso
 
-Run "máximo" (muchos datos, ver docs/entrenamiento.md):
+Run "máximo" (muchos datos, ver docs/informe/06-validacion-resultados.md):
     python scripts/train_eegnet_pooled.py --config ../configs/kumar2024.yaml \
         --subjects {1..18} --epochs 300 --augment --loso-subset 25   # llaves: zsh y bash las separan
 """

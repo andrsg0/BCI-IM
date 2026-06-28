@@ -8,7 +8,7 @@ export interface NavItem {
 }
 
 /**
- * Los dos mundos del sistema (ver docs/presentacion.md):
+ * Los dos mundos del sistema (ver docs/informe/00-vision-y-teoria-LTI.md):
  *  - 'offline': cálculos hechos ANTES del streaming (entrenar/validar el modelo).
  *  - 'online' : lo que ocurre AHORA, en tiempo real (la señal llega y se clasifica).
  *  - 'general': páginas transversales (inicio, glosario).

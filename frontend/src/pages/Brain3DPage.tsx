@@ -45,7 +45,7 @@ const HELP: HelpContent = {
   terms: ['ERD/ERS', 'Banda µ/β', 'Sistema 10-20', 'Causalidad', 'CSP'],
 }
 
-// Modo de coloreo (ver docs/frontend-design.md · "Cerebro 3D EN VIVO"):
+// Modo de coloreo (ver docs/informe/07-streaming-en-vivo.md · "Cerebro 3D EN VIVO"):
 //  - 'erd':  desviación de cada canal respecto a su PROPIA línea base reciente
 //            (EMA lenta). Un descenso = azul = desincronización (ERD). Muestra la
 //            lateralización contralateral de la imaginación motora.

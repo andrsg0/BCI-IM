@@ -383,10 +383,6 @@ python -m pytest tests/test_csp.py::test_name -v   # un test específico
 
 | Documento | Contenido |
 |---|---|
-| `docs/pipeline.md` | Arquitectura completa del pipeline DSP/ML |
-| `docs/frontend-design.md` | Decisiones de diseño del frontend |
+| `docs/informe/` | **Informe completo** (10 secciones): teoría LTI, decisiones, scripts y representación en la web — la base de la defensa. Empieza por [`00-vision-y-teoria-LTI.md`](docs/informe/00-vision-y-teoria-LTI.md) |
 | `docs/glosario.md` | Glosario de términos (servido vía `/api/glossary`) |
-| `docs/entrenamiento.md` | Detalles del proceso de entrenamiento |
-| `docs/datasets.md` | Documentación de los datasets soportados |
-| `docs/presentacion.md` | Notas para la presentación del proyecto |
 | `CLAUDE.md` | Contexto técnico detallado para desarrollo con IA |

@@ -1,7 +1,7 @@
 # Frontend — Interfaz didáctica BCI (Etapa 2)
 
 SPA **React + TypeScript + Vite** con estética clara científica. Diseño completo y
-decisiones en [`../docs/frontend-design.md`](../docs/frontend-design.md).
+decisiones en [`../docs/informe/08-frontend.md`](../docs/informe/08-frontend.md).
 
 ## Stack
 React 19 · Vite · TypeScript · Tailwind v4 · react-router · **Zustand** (estado global) ·

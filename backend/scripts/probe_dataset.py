@@ -3,7 +3,7 @@
 Responde, para un dataset cualquiera del catálogo de MOABB, la pregunta:
 **¿sirve para mi proyecto?** Lo comprueba de forma EMPÍRICA (no fiándose de la tabla
 de MOABB), porque los metadatos a veces mienten: Lee2019_MI declara 2 sesiones pero
-MOABB 1.5.0 solo expone 1 (ver docs/datasets.md). Aquí se descarga 1 sujeto y se
+MOABB 1.5.0 solo expone 1 (ver docs/informe/01-datos.md). Aquí se descarga 1 sujeto y se
 verifica de verdad.
 
 Qué verifica, en orden:
@@ -206,10 +206,10 @@ def main() -> None:
         print(f"  ⚠ {n}")
     print(f"  (probado en sujeto {args.subject}; tiempo {time.time()-t0:.0f}s)")
 
-    # Fila lista para pegar en docs/datasets.md
+    # Fila lista para pegar en la tabla de datasets (docs/informe/01-datos.md)
     acc_is = f"{acc_inter:.3f}" if acc_inter is not None else "—"
     acc_en = f"{acc_eeg:.3f}" if acc_eeg is not None else "—"
-    print("\n  Fila para docs/datasets.md (suj. {}):".format(args.subject))
+    print("\n  Fila para docs/informe/01-datos.md (suj. {}):".format(args.subject))
     print(f"  | {args.dataset} | {len(ds.subject_list)} | {len(sesiones_ok)} | {n_ch} | "
           f"{fs:.0f} | {kfold.accuracy:.3f} | {acc_is} | {acc_en} |")
 
