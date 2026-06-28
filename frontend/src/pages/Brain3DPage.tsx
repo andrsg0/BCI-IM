@@ -5,6 +5,7 @@ import type { HelpContent } from '../components/HelpButton'
 import { Widget } from '../components/Widget'
 import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { divergingColor } from '../lib/color'
+import { elecInfo } from '../lib/electrodes'
 import { useStore } from '../store/useStore'
 import { openStream, getJSON } from '../api/client'
 import { progressFromFrame, type ProgressFrame } from '../lib/progress'
@@ -13,18 +14,6 @@ interface PosResp { channels: string[]; pos3d: Pos3D }
 interface Msg { pred: string; probs: Record<string, number>; power: number[] }
 
 const CLASS_COLORS = ['#2563eb', '#e11d48', '#059669', '#d97706']
-
-// Clasifica un electrodo 10-10 por nombre: ¿es de la corteza motora? ¿qué hemisferio?
-// (impar = izquierda, par = derecha, z = línea media). Ej.: C3→motor/L, FC4→motor/R, POz→no.
-function elecInfo(ch: string): { motor: boolean; side: 'L' | 'R' | 'M' } {
-  const m = ch.match(/^([A-Za-z]+?)(z|\d+)$/i)
-  if (!m) return { motor: false, side: 'M' }
-  const prefix = m[1].toUpperCase()
-  const suf = m[2].toLowerCase()
-  const motor = ['C', 'FC', 'CP', 'FCC', 'CCP'].includes(prefix)
-  const side: 'L' | 'R' | 'M' = suf === 'z' ? 'M' : parseInt(suf, 10) % 2 === 1 ? 'L' : 'R'
-  return { motor, side }
-}
 
 /** Barra divergente (azul − / rojo +) para comparar hemisferios. */
 function DivBar({ label, value, scale }: { label: string; value: number; scale: number }) {

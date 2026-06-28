@@ -358,7 +358,7 @@ function AggregateMatrix({ a }: { a: AggregateResult }) {
             </div>
           </div>
           <div className="mt-3 space-y-2 text-xs text-slate-500">
-            <p>Pooled por sujeto sobre {a.n_datasets} datasets evaluados · azar 50% · n = nº de sujetos.</p>
+            <p>Agrupado por sujeto sobre {a.n_datasets} datasets evaluados · azar 50% · n = nº de sujetos.</p>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Dispersión entre sujetos (toda la población)
@@ -665,41 +665,6 @@ function SubjectDetail({ r, subject }: { r: DatasetResult; subject: number }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Ficha del modelo pooled (generalización cross-subject) + provenance.
-// ---------------------------------------------------------------------------
-function PooledCard({ r }: { r: DatasetResult }) {
-  const p = r.pooled
-  if (!p) return null
-  const prov: { label: string; v: string }[] = [
-    { label: 'Media LOSO (cross-subject)', v: pct(p.loso_mean) },
-    { label: 'Sujetos en el pool', v: String(p.n_subjects ?? '—') },
-    { label: 'Trials de entrenamiento', v: String(p.n_train ?? '—') },
-    { label: 'Épocas', v: String(p.epochs ?? '—') },
-    { label: 'Aumentación', v: p.augment ? `sí (×${p.augment_copies})` : 'no' },
-    { label: 'Dispositivo', v: p.device ?? '—' },
-    { label: 'Banda FIR', v: p.fir ? `${p.fir.low_hz}–${p.fir.high_hz} Hz` : '—' },
-    { label: 'Canales', v: String(p.n_channels ?? '—') },
-    { label: 'Entrenado', v: p.trained_on ?? '—' },
-  ]
-  return (
-    <Card title="Modelo EEGNet pooled · generalización a usuario nuevo">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-        {prov.map((it) => (
-          <div key={it.label} className="flex flex-col">
-            <dt className="text-xs text-slate-400">{it.label}</dt>
-            <dd className="font-medium tabular-nums text-slate-700">{it.v}</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="mt-3 text-xs text-slate-500">
-        El modelo base se entrena con TODOS los sujetos (punto de partida para un
-        fine-tuning con calibración corta). La media LOSO es la estimación honesta de
-        ponérselo a alguien que el modelo nunca vio, sin calibrar.
-      </p>
-    </Card>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Página.
@@ -801,8 +766,6 @@ export default function Results() {
               {(detail.subjects?.length ?? 0) > 0 && <AccuracyKappaScatter r={detail} />}
 
               {subject != null && <SubjectDetail r={detail} subject={subject} />}
-
-              <PooledCard r={detail} />
             </>
           ) : (
             <Card title="Detalle"><Skeleton /></Card>

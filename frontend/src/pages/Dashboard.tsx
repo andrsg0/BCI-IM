@@ -10,6 +10,7 @@ import { FillChart } from '../components/charts/FillChart'
 import { Brain3D, type Pos3D } from '../components/Brain3D'
 import { HandPuppet, type HandSide } from '../components/HandPuppet'
 import { RecentTrialsStrip, type TrialOutcome } from '../components/RecentTrials'
+import { motorLaterality } from '../lib/electrodes'
 import { useStore } from '../store/useStore'
 import { DATASETS } from '../lib/datasets'
 import { openStream, getJSON } from '../api/client'
@@ -50,9 +51,9 @@ const CATALOG: CatalogEntry[] = [
   { i: 'raw', title: 'Señal cruda', accent: 'signal', w: 6, h: 4, minW: 4, minH: 3, live: true, desc: 'La señal que “llega del casco”, sin filtrar.', el: <SignalTrace kind="raw" /> },
   { i: 'filt', title: 'Señal filtrada (µ/β, causal)', accent: 'fir', w: 6, h: 4, minW: 4, minH: 3, live: true, desc: 'La misma señal tras el filtro FIR causal en la banda µ/β.', el: <SignalTrace kind="filt" /> },
   { i: 'conf', title: 'Confianza del clasificador en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Probabilidad de cada clase a lo largo del tiempo.', el: <ConfidenceTrace /> },
-  { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Voto suave por trial y aciertos acumulados.', el: <DecisionSummary /> },
+  { i: 'decision', title: 'Decisión (voto por trial)', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Decisión por TRIAL: voto suave (promedio de las ventanas activas) + aciertos acumulados.', el: <DecisionSummary /> },
   { i: 'recent', title: 'Verificación por trial', accent: 'metric', w: 6, h: 3, minW: 3, minH: 2, live: true, desc: 'Tira de ✓/✗ con el acierto de cada trial reciente.', el: <RecentTrialsWidget /> },
-  { i: 'prediction', title: 'Predicción en vivo', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Clase predicha ahora mismo y barras de probabilidad.', el: <PredictionLive /> },
+  { i: 'prediction', title: 'Predicción en vivo', accent: 'metric', w: 4, h: 4, minW: 3, minH: 3, live: true, desc: 'Clase predicha en la ventana ACTUAL (instantánea, ~10/s) y sus probabilidades.', el: <PredictionLive /> },
   { i: 'power', title: 'Potencia µ/β por canal', accent: 'brain', w: 5, h: 4, minW: 3, minH: 3, live: true, desc: 'Barras por electrodo (rojo = más potencia, azul = menos).', el: <PowerBars /> },
   { i: 'disc', title: 'Discriminante LDA en el tiempo', accent: 'metric', w: 8, h: 4, minW: 4, minH: 3, live: true, desc: 'Proyección sobre el eje de decisión del LDA (signo = clase).', el: <DiscTrace /> },
   { i: 'confusion', title: 'Matriz de confusión en vivo', accent: 'metric', w: 4, h: 5, minW: 3, minH: 4, live: true, desc: 'Aciertos y confusiones acumulados por trial.', el: <ConfusionMatrix /> },
@@ -434,9 +435,44 @@ function BrainWidget() {
   }), [subscribe])
 
   if (!pos) return <div className="flex h-full items-center justify-center text-sm text-slate-300">Cargando modelo…</div>
+  // Lateralización: promedio µ/β (vs. base) por corteza motora. El lado con MÁS caída
+  // (azul, ERD) es el más activo ⇒ la mano imaginada es la del lado CONTRARIO.
+  const lat = motorLaterality(pos.channels, values)
+  const scale = Math.max(Math.abs(lat.left), Math.abs(lat.right), 1e-6)
+  const hasSignal = scale > 1e-4
+  const leftMoreErd = lat.left < lat.right
   return (
-    <div className="h-full min-h-[240px] overflow-hidden rounded-lg">
-      <Brain3D channels={pos.channels} pos3d={pos.pos3d} values={values} />
+    <div className="flex h-full flex-col gap-2">
+      <div className="min-h-[170px] flex-1 overflow-hidden rounded-lg">
+        <Brain3D channels={pos.channels} pos3d={pos.pos3d} values={values} />
+      </div>
+      <div className="shrink-0 space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Lateralización motora (ERD)</div>
+        <LatBar label="Izq" value={lat.left} scale={scale} />
+        <LatBar label="Der" value={lat.right} scale={scale} />
+        <p className="text-[11px] leading-snug text-slate-500">
+          {hasSignal ? (
+            <>Más caída µ/β (<span className="font-medium text-blue-600">azul</span>) en el lado{' '}
+              <strong>{leftMoreErd ? 'izquierdo' : 'derecho'}</strong> → suele indicar mano{' '}
+              <strong>{leftMoreErd ? 'derecha' : 'izquierda'}</strong> (ERD contralateral).</>
+          ) : 'Esperando una tendencia clara…'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Barra divergente (azul − / rojo +) para comparar la potencia µ/β de cada hemisferio. */
+function LatBar({ label, value, scale }: { label: string; value: number; scale: number }) {
+  const t = Math.max(-1, Math.min(1, value / scale))
+  const w = Math.abs(t) * 50
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-7 text-[11px] text-slate-500">{label}</span>
+      <div className="relative h-3 flex-1 rounded bg-slate-100">
+        <div className="absolute bottom-0 left-1/2 top-0 w-px bg-slate-300" />
+        <div className="absolute bottom-0 top-0 rounded" style={{ background: divergingColor(t), width: `${w}%`, left: t < 0 ? `${50 - w}%` : '50%' }} />
+      </div>
     </div>
   )
 }
