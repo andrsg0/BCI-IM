@@ -63,6 +63,8 @@ El mapa entre cada concepto de la asignatura y el archivo que lo implementa:
 La abstracción núcleo es **`MotorImageryPipeline`** (`backend/src/bci/pipeline/offline.py`):
 una cadena `fit`/`predict` de cuatro etapas **lineales** encadenadas:
 
+![Pipeline LTI: de la señal cruda a la decisión](figures/00-pipeline.png)
+
 ```
    EEG crudo                FIR (fijo)        CSP            log-varianza        LDA
 (canales × tiempo) ──► banda µ/β 8–30 Hz ─► Z = W·X ─► energía por componente ─► y = w·F + b
