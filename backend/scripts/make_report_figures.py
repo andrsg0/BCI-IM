@@ -90,6 +90,40 @@ def fig_pipeline() -> None:
     _save(fig, "00-pipeline.png")
 
 
+def fig_epoching(cfg: dict, fs: float) -> None:
+    """Línea de tiempo del trial: epoch (FIR completo) + recorte de clasificación + transitorio FIR."""
+    epo, cw, fir = cfg["epoching"], cfg["classification_window"], cfg["fir_filter"]
+    t0, t1 = float(epo["tmin"]), float(epo["tmax"])
+    cs, ce = t0 + float(cw["tmin_rel"]), t0 + float(cw["tmax_rel"])
+    gd = (int(fir["num_taps"]) - 1) / 2 / fs   # retardo de grupo (s)
+
+    fig, ax = plt.subplots(figsize=(10, 2.8))
+    ax.set_xlim(-0.3, t1 + 0.5); ax.set_ylim(0, 3); ax.axis("off")
+    # eje de tiempo
+    ax.annotate("", xy=(t1 + 0.4, 0.5), xytext=(-0.2, 0.5), arrowprops=dict(arrowstyle="->", color="#94a3b8"))
+    for tt in range(0, int(t1) + 1):
+        ax.plot([tt, tt], [0.44, 0.56], color="#cbd5e1")
+        ax.text(tt, 0.18, f"{tt}s", ha="center", fontsize=8, color="#64748b")
+    ax.text(t1 + 0.45, 0.18, "t", fontsize=9, color="#64748b")
+    ax.plot([0, 0], [0.5, 2.5], ":", color="#94a3b8", lw=1)
+    ax.text(0, 2.65, "onset del trial", ha="center", fontsize=8.5, color="#475569")
+    # epoch (se filtra entero)
+    ax.add_patch(FancyBboxPatch((t0, 1.15), t1 - t0, 0.7, boxstyle="round,pad=0.01",
+                                facecolor="#e0f2fe", edgecolor="#0891b2", lw=1.5))
+    ax.text((t0 + t1) / 2, 2.05, f"epoch [{t0:g}, {t1:g}] s — se filtra (FIR) entero",
+            ha="center", fontsize=9, color="#075985")
+    # transitorio FIR en los bordes
+    for xr in (t0, t1 - gd):
+        ax.add_patch(plt.Rectangle((xr, 1.15), gd, 0.7, facecolor="#fecaca", alpha=0.7, edgecolor="none"))
+    ax.text(t0 + gd / 2, 0.95, f"~{gd*1000:.0f} ms\ntransitorio", ha="center", fontsize=6.5, color="#b91c1c")
+    # ventana de clasificación (recorte)
+    ax.add_patch(FancyBboxPatch((cs, 1.22), ce - cs, 0.56, boxstyle="round,pad=0.01",
+                                facecolor="#ddd6fe", edgecolor="#7c3aed", lw=1.5))
+    ax.text((cs + ce) / 2, 1.5, f"clasificación\n[{cs:g}, {ce:g}] s", ha="center", fontsize=8.5, color="#5b21b6")
+    fig.suptitle("Epoching: del trial al recorte de imaginación (BCI IV 2a)", fontsize=11, y=1.0)
+    _save(fig, "01-epoching.png")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(BACKEND_ROOT.parent / "configs" / "default.yaml"))
@@ -159,6 +193,7 @@ def main() -> None:
     _save(fig, "04-lda-boundary.png")
 
     fig_pipeline()
+    fig_epoching(cfg, fs)
     print(f"\nListo. Figuras en {FIG_DIR}")
 
 
