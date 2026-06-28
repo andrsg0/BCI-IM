@@ -28,7 +28,7 @@ convolución discreta, filtros FIR, filtrado espacial lineal (CSP) y respuesta e
 backend/   Pipeline DSP/ML en Python (Etapa 1) + API FastAPI (Etapa 2)
 frontend/  Interfaz React didáctica: convolución, pesos CSP, cerebro 3D (Etapa 2)
 configs/   Archivos YAML de configuración por dataset (en la RAÍZ, no en backend/)
-docs/      Documentación, glosario, diseño del frontend y notas teóricas
+docs/      Informe completo (docs/informe/, 10 secciones) + glosario
 ```
 
 ## Etapas del proyecto
@@ -86,7 +86,7 @@ antes de transmitir) y *en vivo* (verde — tiempo real).
 | **Resultados** | offline | Tabla por sujeto + matriz 2×2 agregada (CSP vs EEGNet × within vs cross), κ de Cohen, rango entre sujetos, Wilcoxon, leyenda de interpretación honesta |
 | **Laboratorio** (`/lab`) | en vivo | Señal cruda vs filtrada; el filtro FIR cambia la señal en vivo |
 | **Clasificación** (`/live`) | en vivo | Demo en vivo con selector de los 4 regímenes; cadena de etapas FIR → CSP → LDA; muñeco que levanta el brazo según la **etiqueta real** del trial |
-| **Demo en vivo** (`/demo`) | en vivo | Vista de la transmisión y predicción en tiempo real |
+| **Benchmark** (`/demo`) | en vivo | Matriz de confusión por modelo/régimen (`/api/eval`): sensibilidad/especificidad y aciertos por clase |
 | **Cerebro 3D** (`/brain`) | en vivo | Malla anatómica real (`.glb`) con *heatmap* cortical µ/β en GPU y electrodos sobre el cuero cabelludo |
 | **Glosario** | general | Términos enlazados in-situ desde el texto de cada sección (fuente única `docs/glosario.md`) |
 
