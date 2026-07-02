@@ -97,6 +97,20 @@ class EEGNetClassifier:
         self.mean_ = None
         self.std_ = None
 
+    def __setstate__(self, state: dict) -> None:
+        """Al DESERIALIZAR, remapea el modelo al dispositivo disponible.
+
+        El .pkl pudo guardarse en una máquina con GPU (``self.device == 'cuda'`` y pesos
+        en CUDA). Los storages ya se cargaron a CPU (ver ``_CPUUnpickler`` en
+        ``pipeline.training``); aquí ajustamos el atributo ``device`` al que HAYA en esta
+        máquina y movemos allí los pesos, para que ``_prep``/``predict`` no intenten usar
+        un 'cuda' inexistente. Así el mismo artefacto sirve en CPU y en GPU.
+        """
+        self.__dict__.update(state)
+        self.device = pick_device(None)
+        if getattr(self, "model", None) is not None:
+            self.model.to(self.device)
+
     def _prep(self, X: np.ndarray) -> torch.Tensor:
         # estandariza por canal con la media/desviación del entrenamiento
         Xs = (X - self.mean_) / self.std_

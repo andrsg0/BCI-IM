@@ -129,9 +129,29 @@ def save_model(model, card: ModelCard, out_dir: Path) -> tuple[Path, Path]:
     return pkl_path, json_path
 
 
+class _CPUUnpickler(pickle.Unpickler):
+    """Unpickler que fuerza los *storages* de torch a cargarse en CPU.
+
+    PORTABILIDAD GPU→CPU: un modelo EEGNet entrenado/guardado en una máquina con GPU
+    serializa sus tensores en dispositivo 'cuda'. Al cargarlo en una máquina SIN GPU,
+    ``torch.load`` intenta restaurarlos en 'cuda' y revienta
+    (``RuntimeError: ... torch.cuda.is_available() is False``). Interceptamos la carga de
+    storages y la remapeamos a CPU. Inofensivo para modelos SIN torch (CSP+LDA): solo
+    toca ``torch.storage._load_from_bytes``, que esos pickles nunca referencian (torch
+    se importa de forma perezosa, solo si el pickle lo necesita).
+    """
+
+    def find_class(self, module, name):
+        if module == "torch.storage" and name == "_load_from_bytes":
+            import io
+            import torch
+            return lambda b: torch.load(io.BytesIO(b), map_location="cpu", weights_only=False)
+        return super().find_class(module, name)
+
+
 def load_model(pkl_path: Path) -> MotorImageryPipeline:
     with Path(pkl_path).open("rb") as fh:
-        return pickle.load(fh)
+        return _CPUUnpickler(fh).load()
 
 
 def load_card(json_path: Path) -> dict:
