@@ -79,8 +79,7 @@ const HELP_EEGNET: HelpContent = {
   points: [
     { label: 'El Efecto Espejo', desc: 'Nota cómo la red neuronal, por sí sola y tras procesar miles de datos, llegó a una conclusión muy similar a la del CSP: descubrió de forma autónoma que para identificar la imaginación motora tiene que prestarle atención casi exclusiva a la corteza motora (puntos de color intenso sobre C3 y C4).' },
     { label: '¿Por qué no hay sección de Varianza o LDA?', desc: 'Porque EEGNet integra todo en su estructura. Sus capas convolucionales actúan como los filtros (CSP), sus funciones de activación y capas de agrupación (pooling de la red) extraen la información de la energía (log-varianza), y su última capa densa (Softmax) actúa como el clasificador final (LDA).' },
-    { label: 'Filtro temporal', desc: 'Tu FIR es un pasa-banda limpio en µ/β (8–30 Hz, zona verde). Cada curva aprendida por EEGNet es la respuesta en frecuencia de uno de sus filtros temporales. Si sus picos caen en la zona verde, la red redescubrió la banda que tú impusiste por teoría.' },
-    { label: 'Ficha de entrenamiento', desc: 'Bajo los gráficos se resume cómo se entrenó la red (trials, banda, épocas) y su accuracy honesta frente al CSP+LDA del mismo sujeto. Con pocos trials, el método clásico suele igualar o superar al deep learning.' },
+    { label: 'Filtro temporal', desc: 'El filtro FIR clásico actúa como un pasa-banda en la banda µ/β (8–30 Hz, zona verde). Cada curva representa la respuesta en frecuencia de uno de los filtros temporales aprendidos por EEGNet. Si los picos se concentran en la zona verde, significa que la red identificó de forma autónoma la banda de frecuencia de interés establecida por la teoría.' },
   ],
   terms: ['CSP+LDA vs EEGNet (teoría vs datos)', 'EEGNet', 'Respuesta en frecuencia'],
 }
@@ -718,7 +717,7 @@ export default function SpatialCSP() {
       </div>
 
       {tab === 'eegnet' ? (
-        <EEGNetModel dataset={dataset} subject={subject} csp={csp} />
+        <EEGNetModel dataset={dataset} subject={subject} />
       ) : !csp ? (
         <div className="flex h-64 items-center justify-center text-slate-300">Calculando CSP…</div>
       ) : (
