@@ -336,7 +336,11 @@ def _ensure_rest_detector(dataset: str, subject: int, method: str):
     # Mismos parámetros que el stream en vivo: el FIR del método, el tamaño de ventana y
     # el paso (en muestras). Solo necesitamos la potencia de banda, NO la predicción.
     window, step = sim.window, sim.step
-    h = getattr(sim, 'h', None) or sim.pipe.filt.h   # EEGNet: sim.h ; CSP+LDA: FIR del pipeline
+    # EEGNet: sim.h ; CSP+LDA: FIR del pipeline. Chequeo explícito de None: `array or ...`
+    # revienta porque bool(ndarray) es ambiguo con más de un elemento.
+    h = getattr(sim, 'h', None)
+    if h is None:
+        h = sim.pipe.filt.h
     cue = float(cfg.get('epoching', {}).get('tmin') or 0.0)   # eje wide: onset=0, cue=tmin
     alo = (win['tmin_rel'] + win_s / 2 + shift) if win else 0.0
     ahi = (win['tmax_rel'] + win_s / 2 + shift) if win else 1e9
