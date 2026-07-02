@@ -16,6 +16,9 @@ petición.
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -65,7 +68,35 @@ def _is_live(meta: dict) -> bool:
     honesta inter-sesión). Derivado de propiedades, sin campo manual."""
     return int(meta.get('sessions', 1)) >= 2
 
-app = FastAPI(title='BCI · Imaginación Motora', version='0.2.0')
+# --- Pre-calentado del caché (arranque rápido de la demo en vivo) -----------
+# El PRIMER /ws/stream en frío es lo único que paga el load del crudo del sujeto (las
+# páginas offline usan payloads precomputados). Para que la demo no se sienta lenta al
+# abrirla, al levantar el server pre-cargamos EN SEGUNDO PLANO (hilo daemon, sin bloquear
+# el arranque ni el resto de peticiones) los datos + modelo del sujeto por defecto —el
+# mismo que sirve /ws/stream sin parámetros— dejando _demo_data_cache/_data_cache/_model_cache
+# calientes. Desactivable con BCI_PREWARM=0 (útil en máquinas sin el dataset descargado).
+PREWARM = ('BNCI2014_001', 1, 'csp_lda')
+
+
+def _prewarm() -> None:
+    dataset, subject, method = PREWARM
+    try:
+        _get_demo_data(dataset, subject)         # load ancho (rellena el angosto)
+        _ensure_model(dataset, subject, method)   # modelo desde disco
+        _split_idx(dataset, subject, method)      # índices held-out (ya en caché)
+        print(f"[prewarm] cachés listos: {dataset} s{subject} ({method})", flush=True)
+    except Exception as exc:  # noqa: BLE001 — el pre-warm es best-effort, nunca tumba el server
+        print(f"[prewarm] omitido ({type(exc).__name__}: {exc})", flush=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if os.getenv('BCI_PREWARM', '1') != '0':
+        threading.Thread(target=_prewarm, name='prewarm', daemon=True).start()
+    yield
+
+
+app = FastAPI(title='BCI · Imaginación Motora', version='0.2.0', lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'],
 )
@@ -114,8 +145,13 @@ def _get_demo_data(dataset: str, subject: int) -> tuple[EpochedData, float]:
 
     Devuelve ``(EpochedData, shift_s)`` donde ``shift_s`` es cuánto se adelantó el inicio
     respecto al epoch de entrenamiento (para recolocar la franja activa en el eje ``t``).
-    Si el epoch ancho no cuadra trial-a-trial con el de entrenamiento (orden/conteo),
-    cae con gracia al epoch normal (``shift_s = 0``).
+
+    UN SOLO load del crudo: el epoch de ENTRENAMIENTO (angosto) es EXACTAMENTE la cola del
+    ancho —mismos trials en el mismo orden, mismo ``tmax``; el ancho solo antepone ``shift``
+    s de reposo— así que en vez de cargar el sujeto dos veces (angosto + ancho), cargamos
+    solo el ancho y DERIVAMOS el angosto rebanándolo, rellenando de paso ``_data_cache``.
+    Verificado byte a byte (``narrow.X == wide.X[:, :, off:]``, ``off = round(shift·fs)``).
+    Si el offset no cuadra (desalineación inesperada), cae al epoch normal (``shift_s = 0``).
     """
     key = (dataset, subject)
     cfg = _config_for(dataset)
@@ -128,18 +164,23 @@ def _get_demo_data(dataset: str, subject: int) -> tuple[EpochedData, float]:
     if shift <= 0.0:                              # sin reposo que añadir: epoch normal
         return _get_data(dataset, subject), 0.0
     if key not in _demo_data_cache:
-        narrow = _get_data(dataset, subject)
         ds = cfg['dataset']
         wide = load_dataset(
             name=ds['name'], subjects=[subject], classes=ds.get('classes'),
             tmin=epo_tmin - shift, tmax=float(epo['tmax']),
             picks=epo.get('picks', 'eeg'), baseline=epo.get('baseline'),
         )
-        # El epoch ancho debe cuadrar trial-a-trial con el normal (mismos eventos en el
-        # mismo orden); si MNE descartó alguno por bordes del registro, no es seguro
-        # reutilizar idx_demo → caemos al epoch normal sin reposo.
-        if wide.n_trials != narrow.n_trials:
-            return narrow, 0.0
+        off = int(round(shift * wide.sfreq))     # muestras de reposo antepuestas
+        if not 0 < off < wide.n_times:           # offset degenerado: sin reposo
+            return _get_data(dataset, subject), 0.0
+        # Deriva el epoch angosto (cola del ancho) y lo deja cacheado como si se hubiera
+        # cargado solo; ``ascontiguousarray`` para que sea idéntico bit a bit al load real
+        # (contiguo float32) y no un view no-contiguo. ``setdefault``: si otro endpoint ya
+        # cargó el angosto de verdad, se respeta (es el mismo dato).
+        _data_cache.setdefault(key, EpochedData(
+            X=np.ascontiguousarray(wide.X[:, :, off:]), y=wide.y,
+            metadata=wide.metadata, ch_names=wide.ch_names, sfreq=wide.sfreq,
+        ))
         _demo_data_cache[key] = wide
     return _demo_data_cache[key], shift
 
@@ -791,20 +832,29 @@ async def ws_stream(websocket: WebSocket, dataset: str = 'BNCI2014_001', subject
         await websocket.close()
         return
     try:
-        # Cargar datos y el modelo YA ENTRENADO fuera del event loop (operación pesada).
-        # Clave de la separación entrenar/transmitir: solo transmitimos los trials
-        # HELD-OUT, que el modelo nunca vio al entrenar (sin fuga de datos).
-        data = await loop.run_in_executor(None, _get_data, dataset, subject)
+        # Cargar el modelo YA ENTRENADO fuera del event loop. Se hace ANTES del crudo:
+        # si el régimen cross no está entrenado, sale con 409 sin pagar ningún load.
         try:
             model, _card = await loop.run_in_executor(None, _ensure_model, dataset, subject, method)
-            _, idx_demo = await loop.run_in_executor(None, _split_idx, dataset, subject, method)
         except HTTPException as exc:   # modelo cross no entrenado todavía
             await websocket.send_json({'error': exc.detail})
             await websocket.close()
             return
-        # Señal del STREAM: epoch ancho que incluye el reposo pre-cue (ver _get_demo_data).
-        # idx_demo se calcula sobre `data` (normal) pero cuadra trial-a-trial con `demo`.
+        # UN SOLO load del crudo (operación pesada): el epoch ANCHO de la demo (incluye el
+        # reposo pre-cue, ver _get_demo_data) rellena de paso el angosto en _data_cache, así
+        # `_get_data` y `_split_idx` de abajo pegan en caché en vez de recargar el sujeto.
+        # Clave de la separación entrenar/transmitir: solo transmitimos los trials HELD-OUT,
+        # que el modelo nunca vio al entrenar (sin fuga de datos).
         demo, shift_s = await loop.run_in_executor(None, _get_demo_data, dataset, subject)
+        data = await loop.run_in_executor(None, _get_data, dataset, subject)
+        # idx_demo se calcula sobre `data` (angosto) pero cuadra trial-a-trial con `demo`.
+        _, idx_demo = await loop.run_in_executor(None, _split_idx, dataset, subject, method)
+        # Blindaje contra desalineación de conteo (raro): descarta índices fuera de rango.
+        idx_demo = idx_demo[idx_demo < demo.X.shape[0]]
+        if idx_demo.size == 0:
+            await websocket.send_json({'error': 'sin trials held-out válidos para la demo'})
+            await websocket.close()
+            return
         cfg = _config_for(dataset)
         s = cfg['streaming']
         ws_len = s['window_s']
